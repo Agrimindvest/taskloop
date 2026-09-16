@@ -1,0 +1,836 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>TaskLoop — earn · complete · repeat</title>
+<style>
+  :root{
+    --teal-50:#f0fdfa;--teal-100:#ccfbf1;--teal-500:#14b8a6;--teal-600:#0d9488;--teal-700:#0f766e;
+    --amber-400:#fbbf24;--amber-500:#f59e0b;--amber-600:#d97706;
+    --slate-50:#f8fafc;--slate-100:#f1f5f9;--slate-200:#e2e8f0;--slate-300:#cbd5e1;--slate-400:#94a3b8;
+    --slate-500:#64748b;--slate-600:#475569;--slate-700:#334155;--slate-800:#1e293b;--slate-900:#0f172a;
+    --danger:#dc2626;--danger-bg:#fee2e2;--success:#16a34a;--success-bg:#dcfce7;
+    --radius:14px;--radius-sm:10px;
+    --shadow-sm:0 1px 2px rgba(15,23,42,.05);
+    --shadow:0 4px 16px rgba(15,23,42,.06),0 1px 3px rgba(15,23,42,.05);
+    --shadow-lg:0 12px 40px rgba(15,23,42,.10),0 2px 6px rgba(15,23,42,.06);
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%}
+  body{font-family:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif;background:var(--slate-50);color:var(--slate-900);margin:0;min-height:100vh;-webkit-font-smoothing:antialiased}
+  .bg{position:fixed;inset:0;z-index:-1;pointer-events:none;
+    background:
+      radial-gradient(60% 50% at 8% 0%,rgba(20,184,166,.18),transparent 60%),
+      radial-gradient(50% 45% at 92% 8%,rgba(251,191,36,.14),transparent 60%),
+      radial-gradient(65% 55% at 50% 100%,rgba(13,148,136,.10),transparent 60%),
+      var(--slate-50);
+  }
+  .bg::after{content:"";position:absolute;inset:0;
+    background-image:linear-gradient(rgba(15,23,42,.035) 1px,transparent 1px),linear-gradient(90deg,rgba(15,23,42,.035) 1px,transparent 1px);
+    background-size:48px 48px;
+    mask-image:radial-gradient(ellipse 80% 60% at 50% 30%,#000 40%,transparent 100%);
+    -webkit-mask-image:radial-gradient(ellipse 80% 60% at 50% 30%,#000 40%,transparent 100%);
+  }
+  .app-shell{max-width:1200px;margin:0 auto;padding:0 20px 80px}
+  .topbar{display:flex;justify-content:space-between;align-items:center;padding:14px 22px;margin:16px 0 24px;
+    background:rgba(255,255,255,.75);backdrop-filter:blur(14px) saturate(140%);-webkit-backdrop-filter:blur(14px) saturate(140%);
+    border:1px solid rgba(226,232,240,.9);border-radius:16px;box-shadow:var(--shadow);flex-wrap:wrap;gap:12px;
+    position:sticky;top:12px;z-index:50}
+  .brand{display:flex;align-items:center;gap:12px;cursor:pointer;user-select:none}
+  .brand-name{font-size:19px;font-weight:800;letter-spacing:-.02em;
+    background:linear-gradient(90deg,var(--teal-600),var(--teal-500) 55%,var(--amber-500));
+    -webkit-background-clip:text;background-clip:text;color:transparent}
+  .brand-tag{color:var(--slate-400);font-size:11px;letter-spacing:.12em;text-transform:uppercase;
+    background:linear-gradient(90deg,#0d9488,#14b8a6 40%,#f59e0b 80%,#0d9488);
+    background-size:300% 100%;-webkit-background-clip:text;background-clip:text;color:transparent;
+    animation:tagFlow 8s linear infinite}
+  @keyframes tagFlow{0%{background-position:0% 0}100%{background-position:300% 0}}
+  .hamburger{margin-left:auto}
+  .hamburger button.hb{padding:9px;border-radius:10px;border:1px solid rgba(226,232,240,.9);background:#fff;cursor:pointer;
+    display:flex;flex-direction:column;gap:4px;width:42px;height:42px;align-items:center;justify-content:center;transition:transform .08s ease}
+  .hamburger button.hb:hover{box-shadow:var(--shadow-sm);transform:translateY(-1px)}
+  .hamburger button.hb span{display:block;width:20px;height:2px;background:var(--slate-700);border-radius:2px;transition:transform .2s ease,opacity .2s ease}
+  .hamburger.open button.hb span:nth-child(1){transform:translateY(6px) rotate(45deg)}
+  .hamburger.open button.hb span:nth-child(2){opacity:0}
+  .hamburger.open button.hb span:nth-child(3){transform:translateY(-6px) rotate(-45deg)}
+  .drawer-scrim{position:fixed;inset:0;background:rgba(15,23,42,.35);opacity:0;pointer-events:none;transition:opacity .2s ease;z-index:90}
+  .drawer-scrim.open{opacity:1;pointer-events:auto}
+  .drawer{position:fixed;top:0;left:0;bottom:0;width:300px;max-width:88vw;background:#fff;z-index:100;
+    transform:translateX(-102%);transition:transform .24s cubic-bezier(.2,.7,.2,1);display:flex;flex-direction:column;box-shadow:0 20px 60px rgba(15,23,42,.25)}
+  .drawer.open{transform:translateX(0)}
+  .drawer-head{padding:20px;border-bottom:1px solid var(--slate-200);display:flex;align-items:center;gap:12px}
+  .drawer-body{padding:12px;overflow-y:auto;flex:1}
+  .drawer-item{display:flex;align-items:center;gap:12px;padding:12px 14px;border-radius:10px;cursor:pointer;color:var(--slate-700);
+    font-weight:600;font-size:14.5px;border:none;background:transparent;width:100%;text-align:left;transition:background .12s ease,color .12s ease}
+  .drawer-item:hover{background:var(--slate-100)}
+  .drawer-item.active{background:linear-gradient(180deg,var(--teal-500),var(--teal-600));color:#fff;box-shadow:0 6px 16px rgba(13,148,136,.3)}
+  .drawer-item.logout{color:#b91c1c}
+  .drawer-item.logout:hover{background:var(--danger-bg)}
+  .drawer-sep{height:1px;background:var(--slate-200);margin:8px 6px}
+  .drawer-foot{padding:14px 20px;border-top:1px solid var(--slate-200);color:var(--slate-400);font-size:12px;text-align:center}
+  .drawer-foot a{color:var(--teal-600);text-decoration:none;font-weight:600}
+  .card{background:rgba(255,255,255,.92);border:1px solid rgba(226,232,240,.9);border-radius:var(--radius);padding:24px;max-width:620px;margin:24px auto;box-shadow:var(--shadow)}
+  .card.wide{max-width:none}
+  .hero{position:relative;overflow:hidden;padding:56px 24px 40px;border-radius:24px;
+    background:linear-gradient(180deg,rgba(255,255,255,.7),rgba(255,255,255,.4));
+    border:1px solid rgba(226,232,240,.9);box-shadow:var(--shadow-lg);text-align:center}
+  .hero h1{font-size:clamp(30px,4.5vw,52px);line-height:1.05;margin:18px 0 12px;letter-spacing:-.03em}
+  .hero .grad{background:linear-gradient(90deg,var(--teal-700),var(--teal-500) 45%,var(--amber-500),var(--teal-700));
+    background-size:300% 100%;-webkit-background-clip:text;background-clip:text;color:transparent;
+    animation:gradShift 6s ease-in-out infinite}
+  @keyframes gradShift{0%,100%{background-position:0% 50%}50%{background-position:100% 50%}}
+  .hero p.lede{color:var(--slate-600);font-size:17px;max-width:640px;margin:0 auto 28px;min-height:2.6em}
+  .cursor{display:inline-block;width:2px;height:1em;background:var(--teal-600);margin-left:2px;vertical-align:-2px;animation:blink 1s steps(1) infinite}
+  @keyframes blink{50%{opacity:0}}
+  input,select,textarea{display:block;width:100%;padding:11px 12px;margin:6px 0 14px;border:1px solid var(--slate-300);border-radius:var(--radius-sm);
+    font-size:14.5px;font-family:inherit;background:#fff;color:var(--slate-900);transition:border-color .15s ease,box-shadow .15s ease}
+  input:focus,select:focus,textarea:focus{outline:none;border-color:var(--teal-500);box-shadow:0 0 0 4px rgba(20,184,166,.15)}
+  label.lbl{font-size:13px;color:var(--slate-600);font-weight:600}
+  .btn{padding:11px 18px;border-radius:var(--radius-sm);border:none;cursor:pointer;font-size:14px;font-weight:700;
+    transition:transform .06s ease,box-shadow .15s ease,filter .15s ease}
+  .btn:active{transform:translateY(1px)}
+  .btn:disabled{opacity:.5;cursor:not-allowed}
+  .btn-primary{background:linear-gradient(180deg,var(--teal-500),var(--teal-600));color:#fff;box-shadow:0 8px 20px rgba(13,148,136,.3)}
+  .btn-primary:hover:not(:disabled){filter:brightness(1.05)}
+  .btn-amber{background:linear-gradient(180deg,var(--amber-400),var(--amber-600));color:#fff;box-shadow:0 8px 20px rgba(217,119,6,.3)}
+  .btn-danger{background:var(--danger-bg);color:#b91c1c}
+  .btn-full{width:100%;margin-top:16px}
+  .pill{display:inline-block;padding:4px 11px;border-radius:999px;color:#fff;font-size:12px;font-weight:700;letter-spacing:.02em}
+  .steps{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:18px;margin-top:26px}
+  .step-card{background:rgba(255,255,255,.9);border:1px solid rgba(226,232,240,.9);border-radius:var(--radius);padding:22px;
+    box-shadow:var(--shadow-sm);transition:transform .12s ease,box-shadow .2s ease}
+  .step-card:hover{transform:translateY(-3px);box-shadow:var(--shadow)}
+  .step-card .num{display:inline-flex;align-items:center;justify-content:center;width:30px;height:30px;border-radius:999px;
+    background:linear-gradient(180deg,var(--teal-500),var(--teal-600));color:#fff;font-weight:800;font-size:14px;margin-bottom:10px;
+    box-shadow:0 6px 14px rgba(13,148,136,.28)}
+  .stats-row{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:14px}
+  .stat{background:rgba(255,255,255,.92);border:1px solid rgba(226,232,240,.9);border-radius:var(--radius);padding:18px;
+    box-shadow:var(--shadow-sm);position:relative;overflow:hidden}
+  .stat::before{content:"";position:absolute;left:0;top:0;bottom:0;width:4px;background:linear-gradient(180deg,var(--teal-500),var(--teal-700));opacity:.9}
+  .stat-label{font-size:12px;color:var(--slate-500);letter-spacing:.04em;text-transform:uppercase;font-weight:700}
+  .stat-value{font-size:22px;font-weight:800;letter-spacing:-.01em;margin-top:4px}
+  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(270px,1fr));gap:18px}
+  .task-card{background:rgba(255,255,255,.94);border:1px solid rgba(226,232,240,.9);border-radius:var(--radius);padding:18px;
+    box-shadow:var(--shadow-sm);transition:transform .12s ease,box-shadow .2s ease}
+  .task-card:hover{transform:translateY(-3px);box-shadow:var(--shadow)}
+  .row{background:rgba(255,255,255,.94);border:1px solid rgba(226,232,240,.9);border-radius:var(--radius-sm);padding:16px;margin:10px 0;
+    display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;box-shadow:var(--shadow-sm)}
+  .banner{padding:14px 16px;border-radius:var(--radius-sm);font-weight:700;text-align:center;margin-bottom:16px}
+  .toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%);color:#fff;padding:13px 22px;border-radius:12px;z-index:999;
+    box-shadow:var(--shadow-lg);font-weight:600;animation:toastIn .22s ease}
+  @keyframes toastIn{from{opacity:0;transform:translate(-50%,8px)}to{opacity:1;transform:translate(-50%,0)}}
+  .muted{color:var(--slate-500)}.center{text-align:center}
+  .progress-bg{height:7px;background:rgba(148,163,184,.25);border-radius:999px;margin-top:10px;overflow:hidden}
+  .progress-fg{height:100%;background:linear-gradient(90deg,var(--teal-500),var(--teal-700));border-radius:999px;transition:width .4s ease}
+  .footer{text-align:center;margin-top:40px;padding:20px;color:var(--slate-400);font-size:13px}
+  .footer a{color:var(--teal-600);text-decoration:none;font-weight:600}
+  .footer a:hover{text-decoration:underline}
+  a{color:var(--teal-600)}
+  .spinner{display:inline-block;width:14px;height:14px;border:2px solid rgba(255,255,255,.4);border-top-color:#fff;border-radius:50%;animation:spin .6s linear infinite;vertical-align:-2px;margin-right:6px}
+  @keyframes spin{to{transform:rotate(360deg)}}
+</style>
+</head>
+<body>
+<div class="bg"></div>
+
+<div class="drawer-scrim" id="drawer-scrim" onclick="closeDrawer()"></div>
+<aside class="drawer" id="drawer">
+  <div class="drawer-head">
+    <svg width="34" height="34" viewBox="0 0 32 32" aria-hidden="true">
+      <defs><linearGradient id="dgl" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#14b8a6"/><stop offset="1" stop-color="#0f766e"/></linearGradient></defs>
+      <circle cx="16" cy="16" r="13" fill="none" stroke="url(#dgl)" stroke-width="3"/>
+      <path d="M22 10 A 8 8 0 1 0 24 16" fill="none" stroke="url(#dgl)" stroke-width="3" stroke-linecap="round"/>
+      <path d="M24 16 l-3 -3 l0 6 z" fill="#f59e0b"/>
+    </svg>
+    <div>
+      <div class="brand-name" style="font-size:17px;">TaskLoop</div>
+      <div class="brand-tag" style="font-size:10px;">earn · complete · repeat</div>
+    </div>
+  </div>
+  <div class="drawer-body" id="drawer-body"></div>
+  <div class="drawer-foot"><a href="admin.html">Admin portal →</a></div>
+</aside>
+
+<div class="app-shell"><div id="root"></div></div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script>
+/* ============================================================
+   TaskLoop — main app (worker + advertiser)
+   Backend: Supabase (Postgres + RLS + SQL functions)
+   Every write goes through an SQL function. Client never writes
+   to tables directly. See /supabase/migrations for schema.
+   ============================================================ */
+
+/* ---------------- CONFIG ---------------- */
+var SUPABASE_URL = "https://jcajknuldlkuwtxhymbt.supabase.co";
+var SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImpjYWprbnVsZGxrdXd0eGh5bWJ0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODk1NjE1MjIsImV4cCI6MjEwNTEzNzUyMn0.erATFYwKkdq6crbHqu1KG3OknUCEDcN6CvvkGDHZRn8";
+
+var sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+/* ---------------- CONSTANTS ---------------- */
+var TIERS = [
+  { id:"free",name:"Free",fee:0 },{ id:"starter",name:"Starter",fee:1000 },
+  { id:"growth",name:"Growth",fee:3250 },{ id:"professional",name:"Professional",fee:5500 },
+  { id:"elite",name:"Elite",fee:7750 },{ id:"executive",name:"Executive",fee:10000 }
+];
+var CATEGORIES = {
+  Like:     { payout:10, color:"#2563eb", template:"Like the target post/page. Confirm you are logged in and the like registers." },
+  Share:    { payout:20, color:"#16a34a", template:"Share the target post to your timeline or a group. Keep it visible for 24h." },
+  Join:     { payout:20, color:"#7c3aed", template:"Join the target group/channel. Stay a member for at least 7 days." },
+  Review:   { payout:50, color:"#d97706", template:"Leave an honest, specific review (min 15 words). No copy-paste." },
+  Research: { payout:50, color:"#475569", template:"Answer the research questions fully. Partial answers will be rejected." },
+  Survey:   { payout:50, color:"#f43f5e", template:"Complete the survey to the end. Attention-check questions must be correct." }
+};
+var MIN_TASK_QTY = 20;
+var TARGET_ON_PAGE_MS = 4000;
+var WITHDRAW_FEE = 0.2;
+var WITHDRAW_MIN = { task:10000, affiliate:1000 };
+var WITHDRAW_DAYS = { task:[15], affiliate:[1,3,5] };
+var BANK = { number:"5012652807", name:"PEER PULSE TECHNOLOGY", bank:"Safe Haven MFB" };
+var ADMIN_EMAIL = "lifedreamguarantor@gmail.com";
+
+/* ---------------- HELPERS ---------------- */
+function uid(){return Math.random().toString(36).slice(2)+Date.now().toString(36)}
+function isBlockedDay(){var d=new Date().getDay();return d===5||d===6}
+function fmtN(n){return "\u20A6"+Number(n||0).toLocaleString("en-NG")}
+function tierById(id){for(var i=0;i<TIERS.length;i++)if(TIERS[i].id===id)return TIERS[i];return TIERS[0]}
+function nextWithdrawDate(type){var t=new Date();for(var i=0;i<40;i++){var d=new Date(t);d.setDate(t.getDate()+i);if(type==="task"){if(d.getDate()===15)return d.toDateString()}else{if(WITHDRAW_DAYS.affiliate.indexOf(d.getDay())!==-1)return d.toDateString()}}return "—"}
+function esc(s){var d=document.createElement("div");d.innerText=s==null?"":s;return d.innerHTML}
+function qs(k){return new URLSearchParams(window.location.search).get(k)}
+
+/* ---------------- LOCAL SESSION (client-only) ---------------- */
+var SESSION_KEY = "taskloop_session";
+function getSession(){
+  try{ return JSON.parse(localStorage.getItem(SESSION_KEY)||"null") }catch(e){ return null }
+}
+function setSession(s){
+  if(s) localStorage.setItem(SESSION_KEY, JSON.stringify(s));
+  else localStorage.removeItem(SESSION_KEY);
+}
+
+/* ---------------- STATE ---------------- */
+var state = {
+  user: null,           // current user row from DB
+  tasks: [],
+  submissions: [],
+  ledger: [],
+  route: "loading",
+  activeStart: null,
+  upgradeStage: "select",
+  upgradeTierId: "starter"
+};
+
+/* ---------------- TOAST ---------------- */
+var toastTimer=null;
+function notify(msg,kind){
+  var el=document.getElementById("toast"); if(!el) return;
+  el.textContent=msg;
+  el.style.display="block";
+  el.style.background=kind==="error"?"#dc2626":kind==="success"?"#16a34a":"#0f172a";
+  clearTimeout(toastTimer);
+  toastTimer=setTimeout(function(){el.style.display="none"},3500);
+}
+
+/* ---------------- DRAWER ---------------- */
+function openDrawer(){document.getElementById("drawer").classList.add("open");document.getElementById("drawer-scrim").classList.add("open");document.body.style.overflow="hidden"}
+function closeDrawer(){document.getElementById("drawer").classList.remove("open");document.getElementById("drawer-scrim").classList.remove("open");document.body.style.overflow=""}
+function toggleDrawer(){document.getElementById("drawer").classList.contains("open")?closeDrawer():openDrawer()}
+function navTo(r){closeDrawer();state.route=r;render()}
+
+function iconFor(name){
+  var i={
+    dashboard:'<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="3" y="3" width="7" height="9"/><rect x="14" y="3" width="7" height="5"/><rect x="14" y="12" width="7" height="9"/><rect x="3" y="16" width="7" height="5"/></svg>',
+    submissions:'<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M9 12l2 2 4-4"/><rect x="3" y="4" width="18" height="16" rx="2"/></svg>',
+    wallet:'<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="2" y="6" width="20" height="14" rx="2"/><path d="M2 10h20"/></svg>',
+    upgrade:'<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 2l3 7 7 .5-5.5 4.5L18 21l-6-3.5L6 21l1.5-7L2 9.5 9 9z"/></svg>',
+    createTask:'<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>',
+    myTasks:'<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 5h18M3 12h18M3 19h12"/></svg>',
+    settings:'<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.6 1.6 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.6 1.6 0 0 0-1.8-.3 1.6 1.6 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1A1.6 1.6 0 0 0 9 19.4a1.6 1.6 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.6 1.6 0 0 0 .3-1.8 1.6 1.6 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1A1.6 1.6 0 0 0 4.6 9a1.6 1.6 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.6 1.6 0 0 0 1.8.3H9a1.6 1.6 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1A1.6 1.6 0 0 0 15 4.6a1.6 1.6 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.6 1.6 0 0 0-.3 1.8V9a1.6 1.6 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.6 1.6 0 0 0-1.5 1z"/></svg>',
+    logout:'<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="M16 17l5-5-5-5"/><path d="M21 12H9"/></svg>',
+    home:'<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 10.5L12 3l9 7.5V21a1 1 0 0 1-1 1h-6v-7h-4v7H4a1 1 0 0 1-1-1z"/></svg>',
+    signup:'<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="9" cy="8" r="4"/><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><path d="M19 8v6M22 11h-6"/></svg>',
+    login:'<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/><path d="M10 17l5-5-5-5"/><path d="M15 12H3"/></svg>'
+  };
+  return i[name]||"";
+}
+function renderDrawer(){
+  var user=state.user, r=state.route, items=[];
+  function item(key,label,route){return '<button class="drawer-item'+(r===route?" active":"")+'" onclick="navTo(\''+route+'\')"><span class="ico">'+iconFor(key)+'</span><span>'+label+'</span></button>'}
+  if(!user){
+    items.push(item("home","Home","landing"));
+    items.push(item("signup","Sign up","signup"));
+    items.push(item("login","Log in","login"));
+  } else {
+    items.push(item("dashboard","Dashboard","dashboard"));
+    items.push(item("submissions","My submissions","submissions"));
+    items.push(item("wallet","Wallet","wallet"));
+    items.push(item("upgrade","Upgrade","upgrade"));
+    items.push(item("createTask","Post a task","createTask"));
+    items.push(item("myTasks","My tasks","myTasks"));
+    items.push(item("settings","Settings","settings"));
+    items.push('<div class="drawer-sep"></div>');
+    items.push('<button class="drawer-item" onclick="copyRef()"><span class="ico">'+iconFor("wallet")+'</span><span>Copy referral code</span></button>');
+    items.push('<div class="drawer-sep"></div>');
+    items.push('<button class="drawer-item logout" onclick="logout()"><span class="ico">'+iconFor("logout")+'</span><span>Log out</span></button>');
+  }
+  document.getElementById("drawer-body").innerHTML=items.join("");
+}
+function copyRef(){
+  if(!state.user) return;
+  try{ navigator.clipboard.writeText(state.user.ref_code); notify("Referral code copied","success") }catch(e){ notify(state.user.ref_code,"info") }
+  closeDrawer();
+}
+
+/* ---------------- ROUTING ---------------- */
+function go(r){ state.route=r; render() }
+function logout(){
+  setSession(null);
+  state.user=null;
+  closeDrawer();
+  go("landing");
+}
+
+/* ---------------- AUTH via SQL functions ---------------- */
+async function doSignup(){
+  var name=document.getElementById("su-name").value.trim();
+  var email=document.getElementById("su-email").value.trim();
+  var password=document.getElementById("su-password").value;
+  var role=document.getElementById("su-role").value;
+  var ref=document.getElementById("su-ref").value.trim();
+
+  if(!name||!email||!password){notify("Fill in every field","error");return}
+
+  var btn=document.getElementById("su-btn");
+  if(btn){btn.disabled=true;btn.innerHTML='<span class="spinner"></span>Creating…'}
+
+  try{
+    var {data,error} = await sb.rpc("fn_signup_user",{
+      p_name:name, p_email:email, p_password:password, p_role:role, p_ref:ref||null
+    });
+    if(error) throw new Error(error.message||"Signup failed");
+    var userId = data.userId;
+    setSession({userId:userId});
+    await loadUser();
+    notify("Welcome to TaskLoop","success");
+    go("dashboard");
+  }catch(e){
+    notify(e.message||"Signup failed","error");
+    if(btn){btn.disabled=false;btn.textContent="Sign up"}
+  }
+}
+
+async function doLogin(){
+  var email=document.getElementById("li-email").value.trim();
+  var password=document.getElementById("li-password").value;
+  if(!email||!password){notify("Fill in both fields","error");return}
+
+  var btn=document.getElementById("li-btn");
+  if(btn){btn.disabled=true;btn.innerHTML='<span class="spinner"></span>Signing in…'}
+
+  try{
+    var {data,error} = await sb.rpc("fn_login_user",{p_email:email,p_password:password});
+    if(error) throw new Error(error.message||"Invalid credentials");
+    var userId = data.userId;
+    setSession({userId:userId});
+    await loadUser();
+    notify("Welcome back","success");
+    go(data.isAdmin ? "dashboard" : "dashboard");
+  }catch(e){
+    notify(e.message||"Login failed","error");
+    if(btn){btn.disabled=false;btn.textContent="Log in"}
+  }
+}
+
+/* ---------------- DATA LOADING ---------------- */
+async function loadUser(){
+  var s=getSession();
+  if(!s||!s.userId){ state.user=null; return }
+  try{
+    var {data,error} = await sb.from("users").select("*").eq("id",s.userId).single();
+    if(error||!data){ setSession(null); state.user=null; return }
+    state.user = data;
+  }catch(e){
+    setSession(null); state.user=null;
+  }
+}
+async function loadTasks(){
+  try{
+    var {data} = await sb.from("tasks").select("*").eq("status","live").order("created_at",{ascending:false});
+    state.tasks = data||[];
+  }catch(e){ state.tasks=[] }
+}
+async function loadSubmissions(){
+  if(!state.user) return;
+  try{
+    var {data} = await sb.from("submissions").select("*").eq("worker_id",state.user.id).order("submitted_at",{ascending:false});
+    state.submissions = data||[];
+  }catch(e){ state.submissions=[] }
+}
+async function loadLedger(){
+  if(!state.user) return;
+  try{
+    var {data} = await sb.from("ledger").select("*").eq("user_id",state.user.id).order("ts",{ascending:false});
+    state.ledger = data||[];
+  }catch(e){ state.ledger=[] }
+}
+async function refreshAll(){
+  await loadUser();
+  await Promise.all([loadTasks(),loadSubmissions(),loadLedger()]);
+}
+
+/* ---------------- TASK ACTIONS ---------------- */
+var activeStartTimer=null;
+async function startTask(taskId){
+  try{
+    var {data,error} = await sb.rpc("fn_start_task",{p_task_id:taskId,p_worker_id:state.user.id});
+    if(error) throw new Error(error.message);
+    state.activeStart = {startId:data.startId, startedAt:data.startedAt, taskId:taskId};
+    state.currentTask = state.tasks.filter(function(t){return t.id===taskId})[0];
+    go("task");
+  }catch(e){ notify(e.message||"Could not start task","error") }
+}
+
+var pendingScreenshot=null;
+function onProofFileChange(input){
+  var f=input.files&&input.files[0]; if(!f){pendingScreenshot=null;return}
+  var r=new FileReader();
+  r.onload=function(){ pendingScreenshot=r.result };
+  r.readAsDataURL(f);
+}
+
+async function submitTask(){
+  var start=state.activeStart;
+  if(!start){notify("No active task","error");return}
+
+  var btn=document.getElementById("task-submit-btn");
+  if(btn){btn.disabled=true;btn.innerHTML='<span class="spinner"></span>Submitting…'}
+
+  try{
+    // Screenshot never uploaded — only its presence is noted.
+    var key = pendingScreenshot ? ("local:"+uid()) : null;
+    var {data,error} = await sb.rpc("fn_submit_task",{
+      p_start_id:start.startId, p_worker_id:state.user.id, p_screenshot_key:key
+    });
+    if(error) throw new Error(error.message);
+    state.activeStart=null; pendingScreenshot=null;
+    notify(data.status==="rejected" ? ("Auto-rejected: "+data.reason) : "Submitted — pending admin review",
+           data.status==="rejected" ? "error":"success");
+    await loadSubmissions();
+    go("submissions");
+  }catch(e){
+    notify(e.message||"Submit failed","error");
+    if(btn){btn.disabled=false;btn.textContent="Submit"}
+  }
+}
+
+/* ---------------- WALLET ---------------- */
+async function requestWithdrawal(){
+  var type=document.getElementById("wd-type").value;
+  var amount=Number(document.getElementById("wd-amount").value);
+  if(!amount||amount<WITHDRAW_MIN[type]){notify("Minimum is "+fmtN(WITHDRAW_MIN[type]),"error");return}
+  var bf=type==="task"?"task_balance":"affiliate_balance";
+  if(Number(state.user[bf])<amount){notify("Insufficient balance","error");return}
+  try{
+    var {data,error} = await sb.rpc("fn_request_withdrawal",{p_user_id:state.user.id,p_type:type,p_amount:amount});
+    if(error) throw new Error(error.message);
+    notify("Withdrawal requested — you'll receive "+fmtN(data.net),"success");
+    await loadUser();
+    go("wallet");
+  }catch(e){ notify(e.message||"Could not request","error") }
+}
+
+/* ---------------- UPGRADE ---------------- */
+function chooseUpgradeTier(id){ state.upgradeTierId=id; render() }
+function revealBank(){
+  state.upgradeStage="loading"; render();
+  setTimeout(function(){ state.upgradeStage="bank"; render() },1800);
+}
+function goToDepositForm(){ state.upgradeStage="form"; render() }
+async function submitDepositClaim(){
+  var fullName=document.getElementById("dep-name").value.trim();
+  var tierId=document.getElementById("dep-tier").value;
+  if(!fullName){notify("Enter your full name","error");return}
+  try{
+    var {data,error} = await sb.rpc("fn_submit_deposit",{p_user_id:state.user.id,p_full_name:fullName,p_tier_id:tierId});
+    if(error) throw new Error(error.message);
+    // Best-effort admin email — the deposit row is the source of truth.
+    fetch("https://formsubmit.co/ajax/"+ADMIN_EMAIL,{
+      method:"POST",
+      headers:{"Content-Type":"application/json",Accept:"application/json"},
+      body:JSON.stringify({_subject:"New TaskLoop tier payment claim",name:fullName,tier:tierId,amount:data.amount,userId:state.user.id})
+    }).catch(function(){});
+    state.upgradeStage="select";
+    notify("Claim submitted — admin will verify","success");
+    go("dashboard");
+  }catch(e){ notify(e.message||"Could not submit claim","error") }
+}
+
+/* ---------------- ADVERTISER ---------------- */
+function onCategoryChange(){
+  var c=document.getElementById("ct-category").value;
+  var cat=CATEGORIES[c];
+  document.getElementById("ct-reward").value=cat.payout;
+  document.getElementById("ct-reward").min=cat.payout;
+  document.getElementById("ct-instructions").value=cat.template;
+  updateTaskTotals();
+}
+function updateTaskTotals(){
+  var q=Math.max(MIN_TASK_QTY,Number(document.getElementById("ct-quantity").value)||MIN_TASK_QTY);
+  var r=Number(document.getElementById("ct-reward").value)||0;
+  var wt=r*q, com=wt*0.5;
+  document.getElementById("ct-worker-total").textContent=fmtN(wt);
+  document.getElementById("ct-commission").textContent=fmtN(com);
+  document.getElementById("ct-grand-total").textContent=fmtN(wt+com);
+}
+async function createTask(){
+  var category=document.getElementById("ct-category").value;
+  var link=document.getElementById("ct-link").value.trim();
+  var quantity=Math.max(MIN_TASK_QTY,Number(document.getElementById("ct-quantity").value));
+  var reward=Math.max(CATEGORIES[category].payout,Number(document.getElementById("ct-reward").value));
+  var instructions=document.getElementById("ct-instructions").value.trim();
+  var premium=document.getElementById("ct-premium").checked;
+  if(!link){notify("Add a link","error");return}
+  try{
+    var {data,error} = await sb.rpc("fn_create_task",{
+      p_advertiser_id:state.user.id, p_category:category, p_link:link,
+      p_quantity:quantity, p_reward:reward, p_instructions:instructions, p_premium:premium
+    });
+    if(error) throw new Error(error.message);
+    notify("Task submitted for admin approval","success");
+    go("myTasks");
+  }catch(e){ notify(e.message||"Could not create task","error") }
+}
+
+/* ---------------- RENDER ---------------- */
+function brandSvg(size){
+  return '<svg width="'+size+'" height="'+size+'" viewBox="0 0 32 32" aria-hidden="true">'+
+    '<defs><linearGradient id="lg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#14b8a6"/><stop offset="1" stop-color="#0f766e"/></linearGradient></defs>'+
+    '<circle cx="16" cy="16" r="13" fill="none" stroke="url(#lg)" stroke-width="3"/>'+
+    '<path d="M22 10 A 8 8 0 1 0 24 16" fill="none" stroke="url(#lg)" stroke-width="3" stroke-linecap="round"/>'+
+    '<path d="M24 16 l-3 -3 l0 6 z" fill="#f59e0b"/></svg>';
+}
+function renderTopBar(){
+  var home=state.user?"dashboard":"landing";
+  return '<div class="topbar">'+
+    '<div class="brand" onclick="go(\''+home+'\')">'+brandSvg(34)+
+      '<div><div class="brand-name">TaskLoop</div><div class="brand-tag">earn · complete · repeat</div></div>'+
+    '</div>'+
+    '<div class="hamburger"><button class="hb" onclick="toggleDrawer()" aria-label="Menu"><span></span><span></span><span></span></button></div>'+
+  '</div>';
+}
+
+/* ---------- LANDING ---------- */
+var heroPhrases=[
+  "Complete simple social tasks. Get paid per completion.",
+  "No daily caps. Work at your own pace.",
+  "Post a task. Grow your reach. Verified by admin.",
+  "Screenshots stay on your device — we never store them.",
+  "earn · complete · repeat"
+];
+var typerState={el:null,phraseIdx:0,charIdx:0,dir:1,timer:null};
+function startHeroTyper(){
+  clearTimeout(typerState.timer);
+  typerState.el=document.getElementById("hero-typer");
+  if(!typerState.el) return;
+  typerState.charIdx=0; typerState.dir=1;
+  function tick(){
+    var el=typerState.el; if(!el) return;
+    var phrase=heroPhrases[typerState.phraseIdx];
+    if(typerState.dir===1){
+      typerState.charIdx++;
+      if(typerState.charIdx>=phrase.length){
+        el.textContent=phrase;
+        typerState.dir=0;
+        typerState.timer=setTimeout(function(){ typerState.dir=-1; tick() },1600);
+        return;
+      }
+    } else {
+      typerState.charIdx--;
+      if(typerState.charIdx<=0){
+        typerState.charIdx=0; typerState.dir=1;
+        typerState.phraseIdx=(typerState.phraseIdx+1)%heroPhrases.length;
+      }
+    }
+    el.textContent=phrase.slice(0,typerState.charIdx);
+    typerState.timer=setTimeout(tick, typerState.dir===1?38:20);
+  }
+  tick();
+}
+
+function renderLanding(){
+  var steps=[
+    ["Pick a task","Browse by category — Like, Share, Join, Review, Research, Survey."],
+    ["Complete it","Stay on the page at least 4 seconds. Submit — timing is verified server-side."],
+    ["Get paid","Approved earnings land in your wallet. Withdraw on schedule. 20% fee applies."]
+  ];
+  var stepsHtml=steps.map(function(p,i){
+    return '<div class="step-card"><div class="num">'+(i+1)+'</div><h3 style="margin:0 0 6px;">'+p[0]+'</h3><p class="muted" style="margin:0;">'+p[1]+'</p></div>';
+  }).join("");
+  return '<div class="hero">'+brandSvg(72)+
+      '<h1>Small tasks. <span class="grad">Real earnings.</span></h1>'+
+      '<p class="lede"><span id="hero-typer"></span><span class="cursor"></span></p>'+
+      '<button class="btn btn-primary" onclick="go(\'signup\')">Start earning</button> '+
+      '<button class="btn btn-amber" onclick="go(\'signup\')">Promote something</button>'+
+    '</div>'+
+    '<div class="steps">'+stepsHtml+'</div>'+
+    '<div style="background:linear-gradient(135deg, rgba(20,184,166,.10), rgba(251,191,36,.08)); border:1px solid rgba(20,184,166,.25); border-radius:16px; padding:22px; margin-top:28px; color:#0f766e;">'+
+      "<strong>Trust:</strong> Balances are server-controlled. Screenshots stay on your device — we never store them. Admin reviews every submission within 24 hours."+
+    '</div>'+
+    '<div class="footer">Looking for the <a href="admin.html">admin portal</a>?</div>';
+}
+
+function renderSignup(){
+  var refFromUrl=qs("ref")||"";
+  return '<div class="card">'+
+    '<h2>Create your TaskLoop account</h2>'+
+    '<input id="su-name" placeholder="Full name" />'+
+    '<input id="su-email" placeholder="Email" />'+
+    '<input id="su-password" type="password" placeholder="Password" />'+
+    '<select id="su-role">'+
+      '<option value="worker">Worker — complete tasks</option>'+
+      '<option value="advertiser">Advertiser — post tasks</option>'+
+      '<option value="both">Both</option>'+
+    '</select>'+
+    '<input id="su-ref" placeholder="Referral code (optional)" value="'+esc(refFromUrl)+'" />'+
+    '<button id="su-btn" class="btn btn-primary btn-full" onclick="doSignup()">Sign up</button>'+
+    '<p class="muted center">Already have an account? <a href="#" onclick="go(\'login\');return false;">Log in</a></p>'+
+  '</div>';
+}
+
+function renderLogin(){
+  return '<div class="card">'+
+    '<h2>Welcome back</h2>'+
+    '<input id="li-email" placeholder="Email" />'+
+    '<input id="li-password" type="password" placeholder="Password" />'+
+    '<button id="li-btn" class="btn btn-primary btn-full" onclick="doLogin()">Log in</button>'+
+    '<p class="muted center">No account? <a href="#" onclick="go(\'signup\');return false;">Sign up</a></p>'+
+  '</div>';
+}
+
+function renderDashboard(){
+  var user=state.user, tier=tierById(user.tier_id), blocked=isBlockedDay();
+  var liveTasks=state.tasks.filter(function(t){return t.status==="live" && t.completed<t.quantity});
+  var banner=blocked?'<div class="banner" style="background:#fef3c7;color:#92400e;">Tasks are paused platform-wide on Fridays and Saturdays. Come back Sunday.</div>':"";
+  var tasksHtml=liveTasks.length===0?'<p class="muted">No tasks live right now. Check back soon.</p>':
+    '<div class="grid">'+liveTasks.map(function(t){
+      var cat=CATEGORIES[t.category]||{color:"#0d9488"};
+      return '<div class="task-card">'+
+        '<span class="pill" style="background:'+cat.color+';">'+t.category+'</span>'+
+        '<h3 style="margin:10px 0 4px;">'+fmtN(t.reward)+' <span class="muted" style="font-size:13px;">per completion</span></h3>'+
+        '<p class="muted" style="font-size:14px;min-height:40px;">'+esc(t.instructions).slice(0,90)+'…</p>'+
+        '<div class="muted" style="font-size:12px;margin-bottom:10px;">'+t.completed+'/'+t.quantity+' completed</div>'+
+        '<button class="btn btn-primary" style="width:100%;" '+(blocked?"disabled":"")+' onclick="startTask(\''+t.id+'\')">'+(blocked?"Paused today":"Start")+'</button>'+
+      '</div>';
+    }).join("")+'</div>';
+  return '<div style="padding-top:8px;">'+banner+
+    '<div class="stats-row">'+
+      '<div class="stat"><div class="stat-label">Task balance</div><div class="stat-value">'+fmtN(user.task_balance)+'</div></div>'+
+      '<div class="stat"><div class="stat-label">Affiliate balance</div><div class="stat-value">'+fmtN(user.affiliate_balance)+'</div></div>'+
+      '<div class="stat"><div class="stat-label">Tier</div><div class="stat-value">'+tier.name+'</div></div>'+
+      '<div class="stat"><div class="stat-label">Referral code</div><div class="stat-value" style="font-size:16px;">'+esc(user.ref_code)+'</div></div>'+
+    '</div>'+
+    '<h2 style="margin-top:28px;">Available tasks</h2>'+tasksHtml+
+  '</div>';
+}
+
+function renderTaskDetail(){
+  var start=state.activeStart, task=state.currentTask;
+  if(!start||!task) return '<div class="card">No active task. <button class="btn btn-primary" onclick="go(\'dashboard\')">Back</button></div>';
+  var cat=CATEGORIES[task.category]||{color:"#0d9488"};
+  return '<div class="card wide" style="max-width:720px;">'+
+    '<span class="pill" style="background:'+cat.color+';">'+task.category+'</span>'+
+    '<h2 style="margin-top:10px;">'+fmtN(task.reward)+' — '+task.category+' task</h2>'+
+    '<p class="muted">'+esc(task.instructions)+'</p>'+
+    '<p><a href="'+esc(task.link)+'" target="_blank" rel="noreferrer">'+esc(task.link)+'</a></p>'+
+    '<div id="task-timer" class="banner" style="background:#fef3c7;color:#92400e;">Stay on this page for '+(TARGET_ON_PAGE_MS/1000).toFixed(1)+'s</div>'+
+    '<label style="display:block;margin:12px 0;color:#475569;font-size:14px;">Optional screenshot (stays on your device — never uploaded)'+
+      '<input type="file" accept="image/*" onchange="onProofFileChange(this)" style="margin-top:6px;" />'+
+    '</label>'+
+    '<button id="task-submit-btn" class="btn btn-primary btn-full" disabled onclick="submitTask()">Submit</button>'+
+    '<p class="muted" style="font-size:12px;text-align:center;">Server verifies elapsed time. Under 2s → auto-rejected. Otherwise → admin review (24h).</p>'+
+  '</div>';
+}
+
+function renderSubmissions(){
+  var mine=state.submissions;
+  var rows=mine.length===0?'<p class="muted">No submissions yet.</p>':mine.map(function(s){
+    var task=state.tasks.filter(function(t){return t.id===s.task_id})[0];
+    var color=s.status==="approved"?"#16a34a":s.status==="rejected"?"#dc2626":"#d97706";
+    return '<div class="row"><div><strong>'+(task?task.category:"Task")+'</strong> — '+fmtN(s.payout)+
+      '<div class="muted" style="font-size:12px;">'+new Date(Number(s.submitted_at)).toLocaleString()+'</div>'+
+      (s.reason?'<div style="font-size:13px;color:#dc2626;">'+esc(s.reason)+'</div>':"")+
+      '</div><span class="pill" style="background:'+color+';">'+s.status+(s.auto_approved?" (auto)":"")+'</span></div>';
+  }).join("");
+  return '<h2>My submissions</h2>'+rows;
+}
+
+function renderWallet(){
+  var user=state.user;
+  var ledger=state.ledger;
+  var ledgerHtml=ledger.length===0?'<p class="muted">No transactions yet.</p>':ledger.map(function(l){
+    return '<div class="row"><div>'+esc(l.note)+' <span class="muted" style="font-size:12px;">&middot; '+new Date(Number(l.ts)).toLocaleString()+'</span></div><div style="color:'+(Number(l.amount)>=0?"#16a34a":"#dc2626")+';">'+(Number(l.amount)>=0?"+":"")+fmtN(l.amount)+'</div></div>';
+  }).join("");
+  return '<div class="stats-row">'+
+      '<div class="stat"><div class="stat-label">Task balance</div><div class="stat-value">'+fmtN(user.task_balance)+'</div></div>'+
+      '<div class="stat"><div class="stat-label">Affiliate balance</div><div class="stat-value">'+fmtN(user.affiliate_balance)+'</div></div>'+
+    '</div>'+
+    '<div class="card wide" style="margin-top:20px;">'+
+      '<h3>Withdraw</h3>'+
+      '<p class="muted" style="font-size:13px;">20% fee on every withdrawal. Task earnings: 15th monthly. Affiliate: Mon/Wed/Fri.</p>'+
+      '<select id="wd-type"><option value="task">Task earnings — min '+fmtN(WITHDRAW_MIN.task)+'</option><option value="affiliate">Affiliate earnings — min '+fmtN(WITHDRAW_MIN.affiliate)+'</option></select>'+
+      '<input id="wd-amount" type="number" placeholder="Amount" />'+
+      '<button class="btn btn-amber btn-full" onclick="requestWithdrawal()">Request withdrawal</button>'+
+    '</div>'+
+    '<h3 style="margin-top:24px;">Transaction history</h3>'+ledgerHtml;
+}
+
+function renderUpgrade(){
+  var tier=tierById(state.upgradeTierId);
+  var paid=TIERS.filter(function(t){return t.fee>0});
+  var options=paid.map(function(t){return '<option value="'+t.id+'"'+(t.id===state.upgradeTierId?" selected":"")+'>'+t.name+' — '+fmtN(t.fee)+'</option>'}).join("");
+  var html="";
+  if(state.upgradeStage==="select"){
+    html='<select id="up-tier" onchange="chooseUpgradeTier(this.value)">'+options+'</select>'+
+      '<p>You will pay: <strong>'+fmtN(tier.fee)+'</strong></p>'+
+      '<button class="btn btn-primary btn-full" onclick="revealBank()">Get bank details</button>';
+  } else if(state.upgradeStage==="loading"){
+    html='<p class="center" style="padding:30px;color:#0d9488;">Please hold on, generating your bank…</p>';
+  } else if(state.upgradeStage==="bank"){
+    html='<div style="background:linear-gradient(135deg, rgba(20,184,166,.10), rgba(251,191,36,.06)); border:1px solid rgba(20,184,166,.25); border-radius:12px; padding:18px; margin-top:12px;">'+
+      '<div>Account number: <strong>'+BANK.number+'</strong></div>'+
+      '<div>Account name: <strong>'+BANK.name+'</strong></div>'+
+      '<div>Bank: <strong>'+BANK.bank+'</strong></div>'+
+      '<div style="margin-top:8px;">Amount: <strong>'+fmtN(tier.fee)+'</strong></div>'+
+      '</div>'+
+      '<p class="muted" style="font-size:13px;">Pay externally, then confirm below. Admin cross-checks the bank statement.</p>'+
+      '<button class="btn btn-primary btn-full" onclick="goToDepositForm()">I\'ve paid — confirm</button>';
+  } else if(state.upgradeStage==="form"){
+    html='<input id="dep-name" placeholder="Full name on transfer" />'+
+      '<select id="dep-tier">'+options+'</select>'+
+      '<p class="muted" style="font-size:13px;">This also emails '+ADMIN_EMAIL+' via FormSubmit.</p>'+
+      '<button class="btn btn-primary btn-full" onclick="submitDepositClaim()">Submit claim</button>';
+  }
+  return '<div class="card"><h2>Upgrade membership</h2>'+
+    '<p class="muted" style="font-size:14px;">One-time lifetime fee. Manual bank transfer, verified by admin.</p>'+
+    html+'</div>';
+}
+
+function renderCreateTask(){
+  var catOptions=Object.keys(CATEGORIES).map(function(c){return "<option>"+c+"</option>"}).join("");
+  var d=CATEGORIES.Like;
+  return '<div class="card wide" style="max-width:720px;">'+
+    '<h2>Post a task</h2>'+
+    '<label class="lbl">Category</label>'+
+    '<select id="ct-category" onchange="onCategoryChange()">'+catOptions+'</select>'+
+    '<label class="lbl">Link / URL</label>'+
+    '<input id="ct-link" placeholder="https://…" />'+
+    '<label class="lbl">Quantity (min '+MIN_TASK_QTY+', no max)</label>'+
+    '<input id="ct-quantity" type="number" value="'+MIN_TASK_QTY+'" oninput="updateTaskTotals()" />'+
+    '<label class="lbl">Reward per task (min '+fmtN(d.payout)+' — can only increase)</label>'+
+    '<input id="ct-reward" type="number" value="'+d.payout+'" oninput="updateTaskTotals()" />'+
+    '<label class="lbl">Instructions</label>'+
+    '<textarea id="ct-instructions" style="min-height:90px;">'+d.template+'</textarea>'+
+    '<label style="display:flex;gap:8px;align-items:center;margin:12px 0;"><input type="checkbox" id="ct-premium" /> Premium lane (+40%) — routes to paid-tier workers first</label>'+
+    '<div style="background:rgba(241,245,249,.7); border:1px solid var(--slate-200); border-radius:12px; padding:14px;">'+
+      '<div>Worker payout total: <strong id="ct-worker-total">'+fmtN(d.payout*MIN_TASK_QTY)+'</strong></div>'+
+      '<div>Platform commission (50%): <strong id="ct-commission">'+fmtN(d.payout*MIN_TASK_QTY*0.5)+'</strong></div>'+
+      '<div style="border-top:1px solid var(--slate-200); margin-top:6px; padding-top:6px;">You fund: <strong id="ct-grand-total">'+fmtN(d.payout*MIN_TASK_QTY*1.5)+'</strong></div>'+
+    '</div>'+
+    '<button class="btn btn-primary btn-full" onclick="createTask()">Submit for admin approval</button>'+
+  '</div>';
+}
+
+function renderMyTasks(){
+  var mine=state.tasks.filter(function(t){return t.advertiser_id===state.user.id});
+  // Also include pending_approval tasks — reload just in case
+  sb.from("tasks").select("*").eq("advertiser_id",state.user.id).order("created_at",{ascending:false}).then(function(res){
+    if(res.data && res.data.length!==state.myTasksCount){
+      state.myTasksCount=res.data.length;
+      state._myTasks=res.data;
+      if(state.route==="myTasks") render();
+    }
+  });
+  var list=state._myTasks||mine;
+  var rows=list.length===0?'<p class="muted">You haven\'t posted any tasks yet.</p>':list.map(function(t){
+    var statusColor=t.status==="live"?"#16a34a":t.status==="completed"?"#0d9488":t.status==="paused"?"#94a3b8":"#d97706";
+    var pct=Math.min(100,(t.completed/t.quantity)*100);
+    return '<div class="row" style="flex-direction:column;align-items:stretch;">'+
+      '<div style="display:flex;justify-content:space-between;"><strong>'+t.category+' &middot; '+fmtN(t.reward)+'/task</strong><span class="pill" style="background:'+statusColor+';">'+t.status+'</span></div>'+
+      '<div class="muted" style="font-size:14px;margin-top:6px;">'+t.completed+'/'+t.quantity+' completed — '+fmtN(t.completed*t.reward*1.5)+' of '+fmtN(t.advertiser_total)+' spent</div>'+
+      '<div class="progress-bg"><div class="progress-fg" style="width:'+pct+'%;"></div></div>'+
+    '</div>';
+  }).join("");
+  return '<h2>My posted tasks</h2>'+rows;
+}
+
+function renderSettings(){
+  var user=state.user;
+  return '<div class="card">'+
+    '<h2>Account settings</h2>'+
+    '<label class="lbl">Name</label><input value="'+esc(user.name)+'" disabled />'+
+    '<label class="lbl">Email</label><input value="'+esc(user.email)+'" disabled />'+
+    '<label class="lbl">Referral code</label><input value="'+esc(user.ref_code)+'" disabled />'+
+    '<p class="muted" style="font-size:12px;">To change your name or email, contact support.</p>'+
+    '<button class="btn btn-danger" onclick="logout()">Log out</button>'+
+  '</div>';
+}
+
+/* ---------------- MAIN RENDER ---------------- */
+function render(){
+  var user=state.user, r=state.route, body="";
+  if(r==="loading"){ document.getElementById("root").innerHTML='<div class="card center"><p class="muted">Loading…</p></div>'; return }
+  if(r==="landing") body=renderLanding();
+  else if(r==="signup") body=renderSignup();
+  else if(r==="login") body=renderLogin();
+  else if(!user) body=renderLanding();
+  else if(r==="dashboard") body=renderDashboard();
+  else if(r==="task") body=renderTaskDetail();
+  else if(r==="submissions") body=renderSubmissions();
+  else if(r==="wallet") body=renderWallet();
+  else if(r==="upgrade") body=renderUpgrade();
+  else if(r==="createTask") body=renderCreateTask();
+  else if(r==="myTasks") body=renderMyTasks();
+  else if(r==="settings") body=renderSettings();
+  else body=user?renderDashboard():renderLanding();
+
+  document.getElementById("root").innerHTML=renderTopBar()+'<div>'+body+'</div>'+'<div id="toast" class="toast" style="display:none;"></div>';
+  renderDrawer();
+  if(r==="task" && state.activeStart) startTaskTimer();
+  if(r==="landing") startHeroTyper();
+}
+
+function startTaskTimer(){
+  clearInterval(activeStartTimer);
+  activeStartTimer=setInterval(function(){
+    var s=state.activeStart;
+    if(!s||state.route!=="task"){clearInterval(activeStartTimer);return}
+    var elapsed=Date.now()-s.startedAt;
+    var remaining=Math.max(0,TARGET_ON_PAGE_MS-elapsed);
+    var t=document.getElementById("task-timer");
+    var b=document.getElementById("task-submit-btn");
+    if(t){
+      t.textContent=remaining>0?("Stay on this page for "+(remaining/1000).toFixed(1)+"s"):"You may submit now";
+      t.style.background=remaining>0?"#fef3c7":"#dcfce7";
+      t.style.color=remaining>0?"#92400e":"#166534";
+    }
+    if(b) b.disabled=remaining>0;
+  },200);
+}
+
+/* ---------------- BOOT ---------------- */
+(async function boot(){
+  await loadUser();
+  if(state.user){
+    state.route="dashboard";
+    await Promise.all([loadTasks(),loadSubmissions(),loadLedger()]);
+  } else {
+    state.route="landing";
+    await loadTasks();
+  }
+  render();
+})();
+</script>
+</body>
+</html>

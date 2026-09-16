@@ -1,0 +1,662 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>TaskLoop · Admin</title>
+<style>
+  :root{
+    --bg-0:#0b1220;--bg-1:#0f172a;--bg-2:#131c33;--bg-3:#1e293b;
+    --line:rgba(148,163,184,.18);
+    --text:#e2e8f0;--muted:#94a3b8;--dim:#64748b;
+    --teal-400:#5eead4;--teal-500:#14b8a6;--teal-600:#0d9488;
+    --amber-400:#fbbf24;
+    --danger-bg:rgba(127,29,29,.35);
+    --radius:14px;--radius-sm:10px;
+    --shadow:0 4px 16px rgba(0,0,0,.35),0 1px 3px rgba(0,0,0,.3);
+    --shadow-lg:0 12px 40px rgba(0,0,0,.5);
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif;
+    background:var(--bg-0);color:var(--text);min-height:100vh;-webkit-font-smoothing:antialiased}
+  .bg{position:fixed;inset:0;z-index:-1;pointer-events:none;
+    background:
+      radial-gradient(60% 50% at 10% 0%,rgba(20,184,166,.22),transparent 60%),
+      radial-gradient(50% 40% at 90% 10%,rgba(99,102,241,.22),transparent 60%),
+      radial-gradient(60% 60% at 50% 100%,rgba(15,118,110,.30),transparent 65%),
+      linear-gradient(180deg,var(--bg-0) 0%,var(--bg-1) 100%)}
+  .bg::after{content:"";position:absolute;inset:0;
+    background-image:linear-gradient(rgba(226,232,240,.045) 1px,transparent 1px),linear-gradient(90deg,rgba(226,232,240,.045) 1px,transparent 1px);
+    background-size:56px 56px;
+    mask-image:radial-gradient(ellipse 80% 60% at 50% 30%,#000 40%,transparent 100%);
+    -webkit-mask-image:radial-gradient(ellipse 80% 60% at 50% 30%,#000 40%,transparent 100%)}
+  .app-shell{max-width:1280px;margin:0 auto;padding:0 20px 80px}
+  .topbar{display:flex;justify-content:space-between;align-items:center;padding:14px 22px;margin:16px 0 24px;
+    background:rgba(15,23,42,.75);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);
+    border:1px solid var(--line);border-radius:16px;box-shadow:var(--shadow);flex-wrap:wrap;gap:12px;
+    position:sticky;top:12px;z-index:50}
+  .brand{display:flex;align-items:center;gap:12px;cursor:pointer;user-select:none}
+  .brand-name{font-size:19px;font-weight:800;letter-spacing:-.02em;
+    background:linear-gradient(90deg,var(--teal-400),#a5b4fc 60%,var(--amber-400));
+    -webkit-background-clip:text;background-clip:text;color:transparent}
+  .brand-tag{color:var(--muted);font-size:11px;letter-spacing:.14em;text-transform:uppercase;
+    background:linear-gradient(90deg,#5eead4,#a5b4fc 40%,#fbbf24 80%,#5eead4);
+    background-size:300% 100%;-webkit-background-clip:text;background-clip:text;color:transparent;
+    animation:tagFlow 8s linear infinite}
+  @keyframes tagFlow{0%{background-position:0% 0}100%{background-position:300% 0}}
+  .badge{font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;padding:3px 8px;border-radius:999px;
+    background:linear-gradient(90deg,#1e293b,#334155);color:#fbbf24;margin-left:6px}
+  .hamburger{margin-left:auto}
+  .hamburger button.hb{padding:9px;border-radius:10px;border:1px solid var(--line);background:rgba(30,41,59,.6);cursor:pointer;
+    display:flex;flex-direction:column;gap:4px;width:42px;height:42px;align-items:center;justify-content:center}
+  .hamburger button.hb:hover{background:rgba(30,41,59,.9)}
+  .hamburger button.hb span{display:block;width:20px;height:2px;background:#cbd5e1;border-radius:2px;transition:transform .2s ease,opacity .2s ease}
+  .hamburger.open button.hb span:nth-child(1){transform:translateY(6px) rotate(45deg)}
+  .hamburger.open button.hb span:nth-child(2){opacity:0}
+  .hamburger.open button.hb span:nth-child(3){transform:translateY(-6px) rotate(-45deg)}
+  .drawer-scrim{position:fixed;inset:0;background:rgba(0,0,0,.55);opacity:0;pointer-events:none;transition:opacity .2s ease;z-index:90}
+  .drawer-scrim.open{opacity:1;pointer-events:auto}
+  .drawer{position:fixed;top:0;left:0;bottom:0;width:320px;max-width:90vw;background:var(--bg-2);z-index:100;
+    transform:translateX(-102%);transition:transform .24s cubic-bezier(.2,.7,.2,1);display:flex;flex-direction:column;
+    box-shadow:0 20px 60px rgba(0,0,0,.6);border-right:1px solid var(--line)}
+  .drawer.open{transform:translateX(0)}
+  .drawer-head{padding:20px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:12px}
+  .drawer-body{padding:12px;overflow-y:auto;flex:1}
+  .drawer-item{display:flex;align-items:center;gap:12px;padding:12px 14px;border-radius:10px;cursor:pointer;color:#cbd5e1;
+    font-weight:600;font-size:14.5px;border:none;background:transparent;width:100%;text-align:left;transition:background .12s ease,color .12s ease}
+  .drawer-item:hover{background:rgba(30,41,59,.9)}
+  .drawer-item.active{background:linear-gradient(180deg,#14b8a6,#0d9488);color:#fff;box-shadow:0 6px 18px rgba(20,184,166,.45)}
+  .drawer-item.logout{color:#fecaca}
+  .drawer-item.logout:hover{background:var(--danger-bg)}
+  .drawer-sep{height:1px;background:var(--line);margin:8px 6px}
+  .drawer-foot{padding:14px 20px;border-top:1px solid var(--line);color:var(--dim);font-size:12px;text-align:center}
+  .drawer-foot a{color:var(--teal-400);text-decoration:none;font-weight:600}
+  .card{background:rgba(15,23,42,.66);border:1px solid var(--line);border-radius:var(--radius);padding:24px;max-width:640px;margin:24px auto;
+    box-shadow:var(--shadow);backdrop-filter:blur(10px)}
+  .hero{background:linear-gradient(135deg, rgba(20,184,166,.14), rgba(99,102,241,.14));
+    border:1px solid var(--line);border-radius:18px;padding:22px;margin-bottom:20px}
+  .hero h2{margin:0 0 4px;font-size:20px;
+    background:linear-gradient(90deg,#5eead4,#a5b4fc 50%,#fbbf24);
+    background-size:200% 100%;-webkit-background-clip:text;background-clip:text;color:transparent;
+    animation:gradShift 6s ease-in-out infinite}
+  @keyframes gradShift{0%,100%{background-position:0% 50%}50%{background-position:100% 50%}}
+  .hero p{margin:0;color:var(--muted);font-size:14px}
+  input,select,textarea{display:block;width:100%;padding:11px 12px;margin:6px 0 14px;border:1px solid var(--line);
+    border-radius:var(--radius-sm);font-size:14.5px;font-family:inherit;background:rgba(15,23,42,.7);color:var(--text);
+    transition:border-color .15s ease,box-shadow .15s ease}
+  input:focus,select:focus,textarea:focus{outline:none;border-color:var(--teal-500);box-shadow:0 0 0 4px rgba(20,184,166,.22)}
+  label.lbl{font-size:13px;color:var(--muted);font-weight:600}
+  .btn{padding:10px 16px;border-radius:var(--radius-sm);border:none;cursor:pointer;font-size:14px;font-weight:700;
+    transition:transform .06s ease,box-shadow .15s ease,filter .15s ease}
+  .btn:active{transform:translateY(1px)}
+  .btn:disabled{opacity:.5;cursor:not-allowed}
+  .btn-primary{background:linear-gradient(180deg,#14b8a6,#0d9488);color:#fff;box-shadow:0 8px 20px rgba(20,184,166,.32)}
+  .btn-primary:hover:not(:disabled){filter:brightness(1.08)}
+  .btn-ghost{background:transparent;color:#5eead4;border:1px solid rgba(20,184,166,.5)}
+  .btn-danger{background:var(--danger-bg);color:#fecaca}
+  .btn-sm{padding:7px 12px;font-size:13px}
+  .btn-full{width:100%;margin-top:16px}
+  .pill{display:inline-block;padding:4px 11px;border-radius:999px;color:#fff;font-size:12px;font-weight:700;letter-spacing:.02em}
+  .stats-row{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:14px}
+  .stat{background:rgba(15,23,42,.62);border:1px solid var(--line);border-radius:var(--radius);padding:18px;
+    box-shadow:var(--shadow);position:relative;overflow:hidden}
+  .stat::before{content:"";position:absolute;left:0;top:0;bottom:0;width:4px;background:linear-gradient(180deg,#5eead4,#0d9488);opacity:.9}
+  .stat-label{font-size:12px;color:var(--muted);letter-spacing:.04em;text-transform:uppercase;font-weight:700}
+  .stat-value{font-size:22px;font-weight:800;letter-spacing:-.01em;margin-top:4px}
+  .row{background:rgba(15,23,42,.62);border:1px solid var(--line);border-radius:var(--radius-sm);padding:16px;margin:10px 0;
+    display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;box-shadow:var(--shadow)}
+  .toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%);color:#fff;padding:13px 22px;border-radius:12px;z-index:999;
+    box-shadow:var(--shadow-lg);font-weight:600;animation:toastIn .22s ease}
+  @keyframes toastIn{from{opacity:0;transform:translate(-50%,8px)}to{opacity:1;transform:translate(-50%,0)}}
+  .muted{color:var(--muted)}.dim{color:var(--dim)}.center{text-align:center}
+  a{color:#5eead4}
+  .modal-scrim{position:fixed;inset:0;background:rgba(0,0,0,.65);display:flex;align-items:center;justify-content:center;z-index:200;padding:20px}
+  .modal{background:var(--bg-2);border:1px solid var(--line);border-radius:16px;max-width:640px;width:100%;max-height:90vh;overflow-y:auto;
+    box-shadow:var(--shadow-lg);animation:modalIn .18s ease}
+  @keyframes modalIn{from{opacity:0;transform:scale(.97)}to{opacity:1;transform:scale(1)}}
+  .modal-head{padding:18px 22px;border-bottom:1px solid var(--line);display:flex;justify-content:space-between;align-items:center}
+  .modal-body{padding:22px}
+  .modal-foot{padding:16px 22px;border-top:1px solid var(--line);display:flex;justify-content:flex-end;gap:8px}
+  .modal-close{background:transparent;border:none;color:var(--muted);font-size:22px;cursor:pointer;line-height:1}
+  .kv{display:grid;grid-template-columns:140px 1fr;gap:10px 16px;margin-bottom:14px;font-size:14px}
+  .kv > div:nth-child(odd){color:var(--muted)}
+  .tabs{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:18px}
+  .tab{padding:9px 14px;border-radius:10px;border:1px solid var(--line);background:rgba(30,41,59,.6);color:#cbd5e1;
+    font-size:13.5px;font-weight:600;cursor:pointer;transition:all .12s ease}
+  .tab:hover{background:rgba(30,41,59,.9)}
+  .tab.active{background:linear-gradient(180deg,#14b8a6,#0d9488);color:#fff;border-color:transparent;box-shadow:0 6px 18px rgba(20,184,166,.45)}
+  .search-box{position:relative;margin-bottom:14px}
+  .search-box input{margin:0;padding-left:38px}
+  .search-box svg{position:absolute;left:12px;top:50%;transform:translateY(-50%);color:var(--dim)}
+  .spinner{display:inline-block;width:14px;height:14px;border:2px solid rgba(255,255,255,.4);border-top-color:#fff;border-radius:50%;animation:spin .6s linear infinite;vertical-align:-2px;margin-right:6px}
+  @keyframes spin{to{transform:rotate(360deg)}}
+</style>
+</head>
+<body>
+<div class="bg"></div>
+
+<div class="drawer-scrim" id="drawer-scrim" onclick="closeDrawer()"></div>
+<aside class="drawer" id="drawer">
+  <div class="drawer-head">
+    <svg width="34" height="34" viewBox="0 0 32 32" aria-hidden="true">
+      <defs><linearGradient id="dgl" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#5eead4"/><stop offset="1" stop-color="#0d9488"/></linearGradient></defs>
+      <circle cx="16" cy="16" r="13" fill="none" stroke="url(#dgl)" stroke-width="3"/>
+      <path d="M22 10 A 8 8 0 1 0 24 16" fill="none" stroke="url(#dgl)" stroke-width="3" stroke-linecap="round"/>
+      <path d="M24 16 l-3 -3 l0 6 z" fill="#fbbf24"/>
+    </svg>
+    <div>
+      <div class="brand-name" style="font-size:17px;">TaskLoop</div>
+      <div class="brand-tag" style="font-size:10px;">admin portal</div>
+    </div>
+  </div>
+  <div class="drawer-body" id="drawer-body"></div>
+  <div class="drawer-foot"><a href="index.html">← Back to main app</a></div>
+</aside>
+
+<div class="app-shell"><div id="root"></div></div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script>
+/* ============================================================
+   TaskLoop — admin portal
+   Backend: Supabase. Every write goes through fn_admin_* functions.
+   ============================================================ */
+
+var SUPABASE_URL = "https://jcajknuldlkuwtxhymbt.supabase.co";
+var SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImpjYWprbnVsZGxrdXd0eGh5bWJ0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODk1NjE1MjIsImV4cCI6MjEwNTEzNzUyMn0.erATFYwKkdq6crbHqu1KG3OknUCEDcN6CvvkGDHZRn8";
+var sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+var TIERS = [
+  { id:"free",name:"Free",fee:0 },{ id:"starter",name:"Starter",fee:1000 },
+  { id:"growth",name:"Growth",fee:3250 },{ id:"professional",name:"Professional",fee:5500 },
+  { id:"elite",name:"Elite",fee:7750 },{ id:"executive",name:"Executive",fee:10000 }
+];
+var CATEGORY_KEYS = ["Like","Share","Join","Review","Research","Survey"];
+var CATEGORIES = { Like:{color:"#2563eb"},Share:{color:"#16a34a"},Join:{color:"#7c3aed"},Review:{color:"#d97706"},Research:{color:"#475569"},Survey:{color:"#f43f5e"} };
+
+function fmtN(n){return "\u20A6"+Number(n||0).toLocaleString("en-NG")}
+function tierById(id){for(var i=0;i<TIERS.length;i++)if(TIERS[i].id===id)return TIERS[i];return TIERS[0]}
+function esc(s){var d=document.createElement("div");d.innerText=s==null?"":s;return d.innerHTML}
+
+var SESSION_KEY = "taskloop_admin_session";
+function getSession(){ try{ return JSON.parse(localStorage.getItem(SESSION_KEY)||"null") }catch(e){ return null } }
+function setSession(s){ if(s) localStorage.setItem(SESSION_KEY, JSON.stringify(s)); else localStorage.removeItem(SESSION_KEY) }
+
+var state = {
+  admin: null,
+  users: [],
+  tasks: [],
+  submissions: [],
+  withdrawals: [],
+  deposits: [],
+  ledger: [],
+  auditLog: [],
+  tab: "overview",
+  modal: null,
+  search: ""
+};
+
+var toastTimer=null;
+function notify(msg,kind){
+  var el=document.getElementById("toast"); if(!el) return;
+  el.textContent=msg;
+  el.style.display="block";
+  el.style.background=kind==="error"?"#b91c1c":kind==="success"?"#15803d":"#0f172a";
+  clearTimeout(toastTimer);
+  toastTimer=setTimeout(function(){el.style.display="none"},3500);
+}
+
+function openDrawer(){document.getElementById("drawer").classList.add("open");document.getElementById("drawer-scrim").classList.add("open");document.body.style.overflow="hidden"}
+function closeDrawer(){document.getElementById("drawer").classList.remove("open");document.getElementById("drawer-scrim").classList.remove("open");document.body.style.overflow=""}
+function toggleDrawer(){document.getElementById("drawer").classList.contains("open")?closeDrawer():openDrawer()}
+
+function iconFor(name){
+  var i={
+    overview:'<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>',
+    submissions:'<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M9 12l2 2 4-4"/><rect x="3" y="4" width="18" height="16" rx="2"/></svg>',
+    tasks:'<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 6h18M3 12h18M3 18h12"/></svg>',
+    users:'<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="9" cy="8" r="4"/><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><path d="M23 21v-2a4 4 0 0 0-3-3.9"/></svg>',
+    finance:'<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="2" y="6" width="20" height="14" rx="2"/><path d="M2 10h20"/></svg>',
+    fraud:'<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 2l9 4v6c0 5-3.5 9.5-9 10-5.5-.5-9-5-9-10V6z"/><path d="M12 8v4M12 16h.01"/></svg>',
+    audit:'<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 4h16v16H4z"/><path d="M8 8h8M8 12h8M8 16h5"/></svg>',
+    logout:'<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="M16 17l5-5-5-5"/><path d="M21 12H9"/></svg>'
+  };
+  return i[name]||"";
+}
+function renderDrawer(){
+  var items=[];
+  if(state.admin){
+    var r=state.tab;
+    function item(key,label,t){return '<button class="drawer-item'+(r===t?" active":"")+'" onclick="setTab(\''+t+'\')"><span class="ico">'+iconFor(key)+'</span><span>'+label+'</span></button>'}
+    items.push(item("overview","Overview","overview"));
+    items.push(item("submissions","Submissions","submissions"));
+    items.push(item("tasks","Tasks","tasks"));
+    items.push(item("users","Users","users"));
+    items.push(item("finance","Finance","finance"));
+    items.push(item("fraud","Fraud & risk","fraud"));
+    items.push(item("audit","Audit log","audit"));
+    items.push('<div class="drawer-sep"></div>');
+    items.push('<button class="drawer-item logout" onclick="logout()"><span class="ico">'+iconFor("logout")+'</span><span>Log out</span></button>');
+  }
+  document.getElementById("drawer-body").innerHTML=items.join("");
+}
+function setTab(t){ closeDrawer(); state.tab=t; render() }
+
+async function doLogin(){
+  var email=document.getElementById("li-email").value.trim().toLowerCase();
+  var password=document.getElementById("li-password").value;
+  if(!email||!password){notify("Fill in both fields","error");return}
+
+  var btn=document.getElementById("li-btn");
+  if(btn){btn.disabled=true;btn.innerHTML='<span class="spinner"></span>Signing in…'}
+
+  try{
+    var {data,error} = await sb.rpc("fn_login_user",{p_email:email,p_password:password});
+    if(error) throw new Error(error.message||"Login failed");
+    if(!data.isAdmin) throw new Error("Not an admin account");
+    setSession({userId:data.userId});
+    state.admin = {id:data.userId};
+    await loadAdminProfile();
+    await refreshAll();
+    render();
+  }catch(e){
+    notify(e.message||"Login failed","error");
+    if(btn){btn.disabled=false;btn.textContent="Sign in"}
+  }
+}
+
+async function loadAdminProfile(){
+  if(!state.admin) return;
+  var {data} = await sb.from("users").select("*").eq("id",state.admin.id).single();
+  if(data && data.is_admin){ state.admin = data; return }
+  setSession(null); state.admin=null;
+}
+
+function logout(){
+  setSession(null);
+  state.admin=null;
+  state.users=[];state.tasks=[];state.submissions=[];state.withdrawals=[];state.deposits=[];state.ledger=[];state.auditLog=[];
+  closeDrawer();
+  render();
+}
+
+async function refreshAll(){
+  if(!state.admin) return;
+  var [u,t,s,w,d,l,a] = await Promise.all([
+    sb.from("users").select("*").order("created_at",{ascending:false}),
+    sb.from("tasks").select("*").order("created_at",{ascending:false}),
+    sb.from("submissions").select("*").order("submitted_at",{ascending:false}).limit(300),
+    sb.from("withdrawals").select("*").order("ts",{ascending:false}),
+    sb.from("deposits").select("*").order("ts",{ascending:false}),
+    sb.from("ledger").select("*").order("ts",{ascending:false}).limit(300),
+    sb.from("audit_log").select("*").order("ts",{ascending:false}).limit(200)
+  ]);
+  state.users = u.data||[];
+  state.tasks = t.data||[];
+  state.submissions = s.data||[];
+  state.withdrawals = w.data||[];
+  state.deposits = d.data||[];
+  state.ledger = l.data||[];
+  state.auditLog = a.data||[];
+}
+
+async function callAdmin(fnName, params, successMsg){
+  if(!state.admin){notify("Not logged in","error");return false}
+  try{
+    var full = Object.assign({p_admin_id:state.admin.id}, params);
+    var {data,error} = await sb.rpc(fnName, full);
+    if(error) throw new Error(error.message);
+    if(successMsg) notify(successMsg,"success");
+    await refreshAll();
+    render();
+    return true;
+  }catch(e){
+    notify(e.message||"Action failed","error");
+    return false;
+  }
+}
+
+function approveSubmission(id){ callAdmin("fn_admin_approve_submission",{p_submission_id:id},"Approved & credited") }
+function rejectSubmission(id){ callAdmin("fn_admin_reject_submission",{p_submission_id:id,p_reason:"Rejected by admin"},"Submission rejected") }
+function approveTask(id){ callAdmin("fn_admin_approve_task",{p_task_id:id},"Task is now live") }
+function pauseTask(id){ callAdmin("fn_admin_pause_task",{p_task_id:id},"Task status toggled") }
+function approveDeposit(id){ callAdmin("fn_admin_approve_deposit",{p_deposit_id:id},"Tier upgraded") }
+function rejectDeposit(id){ callAdmin("fn_admin_reject_deposit",{p_deposit_id:id},"Deposit rejected") }
+function approveWithdrawal(id){ callAdmin("fn_admin_approve_withdrawal",{p_withdrawal_id:id},"Marked as paid") }
+function rejectWithdrawal(id){ callAdmin("fn_admin_reject_withdrawal",{p_withdrawal_id:id},"Withdrawal rejected") }
+function runSweep(){ callAdmin("fn_admin_sweep_pending",{},"Sweep complete") }
+
+function openEditUser(id){ state.modal={type:"user",id:id}; render() }
+function openEditTask(id){ state.modal={type:"task",id:id}; render() }
+function openAdjustBalance(id,field){ state.modal={type:"balance",id:id,field:field}; render() }
+function closeModal(){ state.modal=null; render() }
+
+function saveUserEdit(){
+  var u=state.users.filter(function(x){return x.id===state.modal.id})[0];
+  if(!u){closeModal();return}
+  callAdmin("fn_admin_edit_user",{
+    p_user_id:u.id,
+    p_name:document.getElementById("eu-name").value.trim(),
+    p_email:document.getElementById("eu-email").value.trim(),
+    p_tier_id:document.getElementById("eu-tier").value,
+    p_is_admin:document.getElementById("eu-admin").checked,
+    p_verified:document.getElementById("eu-verified").checked,
+    p_banned:document.getElementById("eu-banned").checked
+  },"User updated").then(function(ok){ if(ok) closeModal() });
+}
+function saveTaskEdit(){
+  var t=state.tasks.filter(function(x){return x.id===state.modal.id})[0];
+  if(!t){closeModal();return}
+  callAdmin("fn_admin_edit_task",{
+    p_task_id:t.id,
+    p_category:document.getElementById("et-category").value,
+    p_reward:Number(document.getElementById("et-reward").value),
+    p_quantity:Number(document.getElementById("et-quantity").value),
+    p_link:document.getElementById("et-link").value.trim(),
+    p_instructions:document.getElementById("et-instructions").value,
+    p_status:document.getElementById("et-status").value
+  },"Task updated").then(function(ok){ if(ok) closeModal() });
+}
+function adjustBalance(){
+  var u=state.users.filter(function(x){return x.id===state.modal.id})[0];
+  if(!u){closeModal();return}
+  var delta=Number(document.getElementById("ab-delta").value)||0;
+  var reason=document.getElementById("ab-reason").value.trim();
+  if(!reason){notify("Reason is required","error");return}
+  if(!delta){notify("Enter a non-zero amount","error");return}
+  callAdmin("fn_admin_adjust_balance",{
+    p_user_id:u.id,
+    p_field:state.modal.field,
+    p_delta:delta,
+    p_reason:reason
+  },"Balance adjusted").then(function(ok){ if(ok) closeModal() });
+}
+
+function brandSvg(size){
+  return '<svg width="'+size+'" height="'+size+'" viewBox="0 0 32 32" aria-hidden="true">'+
+    '<defs><linearGradient id="lg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#5eead4"/><stop offset="1" stop-color="#0d9488"/></linearGradient></defs>'+
+    '<circle cx="16" cy="16" r="13" fill="none" stroke="url(#lg)" stroke-width="3"/>'+
+    '<path d="M22 10 A 8 8 0 1 0 24 16" fill="none" stroke="url(#lg)" stroke-width="3" stroke-linecap="round"/>'+
+    '<path d="M24 16 l-3 -3 l0 6 z" fill="#fbbf24"/></svg>';
+}
+function renderTopBar(){
+  return '<div class="topbar">'+
+    '<div class="brand" onclick="state.tab=\'overview\';render()">'+brandSvg(34)+
+      '<div><div class="brand-name">TaskLoop <span class="badge">Admin</span></div><div class="brand-tag">control room</div></div>'+
+    '</div>'+
+    '<div class="hamburger"><button class="hb" onclick="toggleDrawer()" aria-label="Menu"><span></span><span></span><span></span></button></div>'+
+  '</div>';
+}
+
+function renderLogin(){
+  return '<div class="card" style="max-width:520px;">'+
+    '<div class="hero"><h2>Restricted area</h2><p>Sign in with an admin account. Ask a super-admin to promote your user if you don\'t have access.</p></div>'+
+    '<input id="li-email" placeholder="Admin email" autocomplete="username" />'+
+    '<input id="li-password" type="password" placeholder="Password" autocomplete="current-password" />'+
+    '<button id="li-btn" class="btn btn-primary btn-full" onclick="doLogin()">Sign in</button>'+
+    '<p class="muted center" style="margin-top:14px;">Not an admin? <a href="index.html">Back to main app</a></p>'+
+  '</div>';
+}
+
+function tabBtn(key,label){return '<button class="tab'+(state.tab===key?" active":"")+'" onclick="setTab(\''+key+'\')">'+label+'</button>'}
+
+function renderOverview(){
+  var pendingSubs=state.submissions.filter(function(s){return s.status==="pending"});
+  var pendingTasks=state.tasks.filter(function(t){return t.status==="pending_approval"});
+  var pendingDeps=state.deposits.filter(function(d){return d.status==="pending"});
+  var pendingWds=state.withdrawals.filter(function(w){return w.status==="pending"});
+  var totalTaskBal=0,totalAffBal=0;
+  state.users.forEach(function(u){totalTaskBal+=Number(u.task_balance||0);totalAffBal+=Number(u.affiliate_balance||0)});
+  return '<div class="stats-row">'+
+      '<div class="stat"><div class="stat-label">Pending submissions</div><div class="stat-value">'+pendingSubs.length+'</div></div>'+
+      '<div class="stat"><div class="stat-label">Pending task posts</div><div class="stat-value">'+pendingTasks.length+'</div></div>'+
+      '<div class="stat"><div class="stat-label">Pending deposits</div><div class="stat-value">'+pendingDeps.length+'</div></div>'+
+      '<div class="stat"><div class="stat-label">Pending withdrawals</div><div class="stat-value">'+pendingWds.length+'</div></div>'+
+      '<div class="stat"><div class="stat-label">Users</div><div class="stat-value">'+state.users.length+'</div></div>'+
+    '</div>'+
+    '<div class="stats-row" style="margin-top:14px;">'+
+      '<div class="stat"><div class="stat-label">Total task balances</div><div class="stat-value">'+fmtN(totalTaskBal)+'</div></div>'+
+      '<div class="stat"><div class="stat-label">Total affiliate balances</div><div class="stat-value">'+fmtN(totalAffBal)+'</div></div>'+
+    '</div>'+
+    '<div class="hero" style="margin-top:20px;"><h2>Recent activity</h2><p>Newest events across the platform.</p></div>'+
+    (state.auditLog.slice(0,10).map(function(a){
+      return '<div class="row"><div><strong>'+esc(a.action)+'</strong> <span class="muted">by '+esc(a.admin_name||"system")+'</span><div class="dim" style="font-size:12px;">'+new Date(Number(a.ts)).toLocaleString()+'</div></div><span class="pill" style="background:#334155;">'+esc(a.target||"—")+'</span></div>';
+    }).join("") || '<p class="muted">No activity yet.</p>');
+}
+
+function renderSubmissionsTab(){
+  var pending=state.submissions.filter(function(s){return s.status==="pending"});
+  var rest=state.submissions.filter(function(s){return s.status!=="pending"}).slice(0,30);
+  function row(s){
+    var u=state.users.filter(function(x){return x.id===s.worker_id})[0];
+    var t=state.tasks.filter(function(x){return x.id===s.task_id})[0];
+    var color=s.status==="approved"?"#16a34a":s.status==="rejected"?"#dc2626":"#d97706";
+    return '<div class="row"><div>'+
+      '<strong>'+esc(u?u.name:"?")+'</strong> — '+(t?t.category:"?")+' — '+fmtN(s.payout)+
+      '<div class="dim" style="font-size:12px;">elapsed '+(Number(s.elapsed_ms)/1000).toFixed(2)+'s &middot; '+new Date(Number(s.submitted_at)).toLocaleString()+' &middot; <span class="pill" style="background:'+color+';">'+s.status+'</span></div>'+
+      (s.reason?'<div class="dim" style="font-size:12px;">'+esc(s.reason)+'</div>':"")+
+    '</div>'+
+    (s.status==="pending"?'<div style="display:flex;gap:6px;">'+
+      '<button class="btn btn-sm btn-primary" onclick="approveSubmission(\''+s.id+'\')">Approve</button>'+
+      '<button class="btn btn-sm btn-danger" onclick="rejectSubmission(\''+s.id+'\')">Reject</button>'+
+    '</div>':"")+'</div>';
+  }
+  return '<h3>Pending submissions ('+pending.length+')</h3>'+
+    (pending.length===0?'<p class="muted">Nothing to review.</p>':pending.map(row).join(""))+
+    (rest.length?'<h3 style="margin-top:22px;">Recent history</h3>'+rest.map(row).join(""):"");
+}
+
+function renderTasksTab(){
+  return '<h3>All tasks ('+state.tasks.length+')</h3>'+
+    (state.tasks.length===0?'<p class="muted">No tasks yet.</p>':
+     state.tasks.map(function(t){
+       var color=CATEGORIES[t.category]?CATEGORIES[t.category].color:"#334155";
+       var adv=state.users.filter(function(u){return u.id===t.advertiser_id})[0];
+       var canApprove=t.status==="pending_approval";
+       var canPause=t.status==="live"||t.status==="paused";
+       return '<div class="row"><div>'+
+         '<span class="pill" style="background:'+color+';">'+t.category+'</span> '+
+         '<strong>'+fmtN(t.reward)+'</strong> × '+t.quantity+
+         '<div class="dim" style="font-size:12px;">'+t.completed+'/'+t.quantity+' done &middot; status: '+t.status+' &middot; advertiser: '+esc(adv?adv.email:"?")+'</div>'+
+         '<div class="dim" style="font-size:12px;word-break:break-all;">'+esc((t.link||"").slice(0,80))+'</div>'+
+       '</div><div style="display:flex;gap:6px;flex-wrap:wrap;">'+
+         (canApprove?'<button class="btn btn-sm btn-primary" onclick="approveTask(\''+t.id+'\')">Approve &amp; publish</button>':"")+
+         (canPause?'<button class="btn btn-sm btn-ghost" onclick="pauseTask(\''+t.id+'\')">'+(t.status==="paused"?"Resume":"Pause")+'</button>':"")+
+         '<button class="btn btn-sm btn-ghost" onclick="openEditTask(\''+t.id+'\')">Edit</button>'+
+       '</div></div>';
+     }).join(""));
+}
+
+function renderUsersTab(){
+  var q=state.search.toLowerCase();
+  var filtered=state.users.filter(function(u){
+    if(!q) return true;
+    return (u.name||"").toLowerCase().indexOf(q)!==-1 || (u.email||"").toLowerCase().indexOf(q)!==-1 || (u.ref_code||"").toLowerCase().indexOf(q)!==-1;
+  });
+  return '<div class="search-box"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg><input id="user-search" placeholder="Search users by name, email, or referral code" value="'+esc(state.search)+'" /></div>'+
+    '<div class="muted" style="margin-bottom:8px;font-size:13px;">Showing '+filtered.length+' of '+state.users.length+' users</div>'+
+    (filtered.map(function(u){
+      return '<div class="row"><div>'+
+        '<strong>'+esc(u.name)+'</strong> <span class="muted">'+esc(u.email)+'</span>'+
+        '<div class="dim" style="font-size:12px;">tier: '+tierById(u.tier_id).name+' &middot; task '+fmtN(u.task_balance)+' &middot; affiliate '+fmtN(u.affiliate_balance)+' &middot; ref '+esc(u.ref_code||"")+'</div>'+
+        '<div class="dim" style="font-size:12px;">'+(u.is_admin?"ADMIN ":"")+(u.verified?"verified ":"")+(u.banned?"BANNED ":"")+'</div>'+
+      '</div><div style="display:flex;gap:6px;flex-wrap:wrap;">'+
+        '<button class="btn btn-sm btn-ghost" onclick="openEditUser(\''+u.id+'\')">Edit</button>'+
+        '<button class="btn btn-sm btn-ghost" onclick="openAdjustBalance(\''+u.id+'\',\'task_balance\')">± Task ₦</button>'+
+        '<button class="btn btn-sm btn-ghost" onclick="openAdjustBalance(\''+u.id+'\',\'affiliate_balance\')">± Affil ₦</button>'+
+      '</div></div>';
+    }).join("") || '<p class="muted">No users match.</p>');
+}
+
+function renderFinanceTab(){
+  return '<h3>Deposit claims</h3>'+
+    (state.deposits.length===0?'<p class="muted">None yet.</p>':
+     state.deposits.map(function(d){
+       var u=state.users.filter(function(x){return x.id===d.user_id})[0];
+       var color=d.status==="pending"?"#d97706":d.status==="approved"?"#16a34a":"#dc2626";
+       return '<div class="row"><div><strong>'+esc(d.full_name)+'</strong> — '+tierById(d.tier_id).name+' — '+fmtN(d.amount)+
+         '<div class="dim" style="font-size:12px;">user: '+(u?esc(u.email):"?")+' &middot; '+new Date(Number(d.ts)).toLocaleString()+'</div></div>'+
+         '<div style="display:flex;gap:6px;align-items:center;"><span class="pill" style="background:'+color+';">'+d.status+'</span>'+
+         (d.status==="pending"?'<button class="btn btn-sm btn-primary" onclick="approveDeposit(\''+d.id+'\')">Approve</button><button class="btn btn-sm btn-danger" onclick="rejectDeposit(\''+d.id+'\')">Reject</button>':"")+
+         '</div></div>';
+     }).join(""))+
+    '<h3 style="margin-top:20px;">Withdrawals</h3>'+
+    (state.withdrawals.length===0?'<p class="muted">None yet.</p>':
+     state.withdrawals.map(function(w){
+       var u=state.users.filter(function(x){return x.id===w.user_id})[0];
+       var color=w.status==="pending"?"#d97706":w.status==="approved"?"#16a34a":"#dc2626";
+       return '<div class="row"><div><strong>'+(u?esc(u.name):"?")+'</strong> — '+w.type+' — gross '+fmtN(w.amount)+' — fee '+fmtN(w.fee)+' — net '+fmtN(w.net)+
+         '<div class="dim" style="font-size:12px;">'+new Date(Number(w.ts)).toLocaleString()+'</div></div>'+
+         '<div style="display:flex;gap:6px;align-items:center;"><span class="pill" style="background:'+color+';">'+w.status+'</span>'+
+         (w.status==="pending"?'<button class="btn btn-sm btn-primary" onclick="approveWithdrawal(\''+w.id+'\')">Mark paid</button><button class="btn btn-sm btn-danger" onclick="rejectWithdrawal(\''+w.id+'\')">Reject</button>':"")+
+         '</div></div>';
+     }).join(""));
+}
+
+function renderFraudTab(){
+  var flags=[];
+  var count={};
+  state.submissions.forEach(function(s){
+    count[s.worker_id]=(count[s.worker_id]||0)+1;
+    if(Number(s.elapsed_ms)<3000 && s.status!=="rejected") flags.push({kind:"fast_submit",userId:s.worker_id,detail:(Number(s.elapsed_ms)/1000).toFixed(2)+"s"});
+  });
+  for(var k in count) if(count[k]>=20) flags.push({kind:"volume",userId:k,detail:count[k]+" submissions"});
+  var linkCount={};
+  state.tasks.forEach(function(t){ if(!t.link)return; linkCount[t.link]=(linkCount[t.link]||0)+1; });
+  for(var lk in linkCount) if(linkCount[lk]>=3) flags.push({kind:"duplicate_link",detail:lk+" ("+linkCount[lk]+" tasks)"});
+  return '<h3>Fraud & risk ('+flags.length+' flags)</h3>'+
+    '<p class="muted" style="font-size:13px;">Auto-detected patterns.</p>'+
+    (flags.length===0?'<p class="muted">No flags.</p>':
+     flags.map(function(f){
+       var u=f.userId?state.users.filter(function(x){return x.id===f.userId})[0]:null;
+       return '<div class="row"><div><strong>'+esc(f.kind)+'</strong>'+(u?' — '+esc(u.name)+' <span class="muted">'+esc(u.email)+'</span>':"")+
+         '<div class="dim" style="font-size:12px;word-break:break-all;">'+esc(f.detail)+'</div></div></div>';
+     }).join(""));
+}
+
+function renderAuditTab(){
+  return '<h3>Audit log ('+state.auditLog.length+' entries)</h3>'+
+    (state.auditLog.length===0?'<p class="muted">Nothing logged yet.</p>':
+     state.auditLog.map(function(a){
+       return '<div class="row"><div><strong>'+esc(a.action)+'</strong> <span class="muted">by '+esc(a.admin_name||"system")+'</span>'+
+         '<div class="dim" style="font-size:12px;">target: '+esc(a.target||"—")+' &middot; '+new Date(Number(a.ts)).toLocaleString()+'</div>'+
+         '<div class="dim" style="font-size:12px;word-break:break-all;">'+esc(JSON.stringify(a.details||{}))+'</div>'+
+       '</div></div>';
+     }).join(""));
+}
+
+function renderAdminBody(){
+  if(state.tab==="submissions") return renderSubmissionsTab();
+  if(state.tab==="tasks") return renderTasksTab();
+  if(state.tab==="users") return renderUsersTab();
+  if(state.tab==="finance") return renderFinanceTab();
+  if(state.tab==="fraud") return renderFraudTab();
+  if(state.tab==="audit") return renderAuditTab();
+  return renderOverview();
+}
+
+function renderTabs(){
+  var keys=[["overview","Overview"],["submissions","Submissions"],["tasks","Tasks"],["users","Users"],["finance","Finance"],["fraud","Fraud & risk"],["audit","Audit log"]];
+  return '<div class="tabs">'+keys.map(function(p){return tabBtn(p[0],p[1])}).join("")+'</div>';
+}
+
+function renderModal(){
+  if(!state.modal) return "";
+  var m=state.modal;
+  if(m.type==="user"){
+    var u=state.users.filter(function(x){return x.id===m.id})[0];
+    if(!u){state.modal=null;return ""}
+    var tierOpts=TIERS.map(function(t){return '<option value="'+t.id+'"'+(t.id===u.tier_id?" selected":"")+'>'+t.name+'</option>'}).join("");
+    return '<div class="modal-scrim" onclick="if(event.target===this)closeModal()"><div class="modal">'+
+      '<div class="modal-head"><strong>Edit user</strong><button class="modal-close" onclick="closeModal()">×</button></div>'+
+      '<div class="modal-body">'+
+        '<div class="kv"><div>User ID</div><div style="word-break:break-all;">'+esc(u.id)+'</div></div>'+
+        '<label class="lbl">Name</label><input id="eu-name" value="'+esc(u.name)+'" />'+
+        '<label class="lbl">Email</label><input id="eu-email" value="'+esc(u.email)+'" />'+
+        '<label class="lbl">Tier</label><select id="eu-tier">'+tierOpts+'</select>'+
+        '<label style="display:flex;gap:8px;align-items:center;margin:8px 0;"><input type="checkbox" id="eu-admin" '+(u.is_admin?"checked":"")+' /> Admin</label>'+
+        '<label style="display:flex;gap:8px;align-items:center;margin:8px 0;"><input type="checkbox" id="eu-verified" '+(u.verified?"checked":"")+' /> Verified</label>'+
+        '<label style="display:flex;gap:8px;align-items:center;margin:8px 0;"><input type="checkbox" id="eu-banned" '+(u.banned?"checked":"")+' /> Suspended (ban)</label>'+
+      '</div>'+
+      '<div class="modal-foot"><button class="btn btn-ghost" onclick="closeModal()">Cancel</button><button class="btn btn-primary" onclick="saveUserEdit()">Save</button></div>'+
+    '</div></div>';
+  }
+  if(m.type==="task"){
+    var t=state.tasks.filter(function(x){return x.id===m.id})[0];
+    if(!t){state.modal=null;return ""}
+    var catOpts=CATEGORY_KEYS.map(function(k){return '<option value="'+k+'"'+(k===t.category?" selected":"")+'>'+k+'</option>'}).join("");
+    return '<div class="modal-scrim" onclick="if(event.target===this)closeModal()"><div class="modal">'+
+      '<div class="modal-head"><strong>Edit task</strong><button class="modal-close" onclick="closeModal()">×</button></div>'+
+      '<div class="modal-body">'+
+        '<div class="kv"><div>Task ID</div><div style="word-break:break-all;">'+esc(t.id)+'</div></div>'+
+        '<label class="lbl">Category</label><select id="et-category">'+catOpts+'</select>'+
+        '<label class="lbl">Reward per task</label><input id="et-reward" type="number" value="'+t.reward+'" />'+
+        '<label class="lbl">Quantity</label><input id="et-quantity" type="number" value="'+t.quantity+'" />'+
+        '<label class="lbl">Link</label><input id="et-link" value="'+esc(t.link)+'" />'+
+        '<label class="lbl">Instructions</label><textarea id="et-instructions" style="min-height:80px;">'+esc(t.instructions)+'</textarea>'+
+        '<label class="lbl">Status</label><select id="et-status">'+
+          ["pending_approval","live","paused","completed"].map(function(s){return '<option value="'+s+'"'+(s===t.status?" selected":"")+'>'+s+'</option>'}).join("")+
+        '</select>'+
+      '</div>'+
+      '<div class="modal-foot"><button class="btn btn-ghost" onclick="closeModal()">Cancel</button><button class="btn btn-primary" onclick="saveTaskEdit()">Save</button></div>'+
+    '</div></div>';
+  }
+  if(m.type==="balance"){
+    var u2=state.users.filter(function(x){return x.id===m.id})[0];
+    if(!u2){state.modal=null;return ""}
+    var field=m.field;
+    var label=field==="task_balance"?"Task balance":"Affiliate balance";
+    return '<div class="modal-scrim" onclick="if(event.target===this)closeModal()"><div class="modal" style="max-width:520px;">'+
+      '<div class="modal-head"><strong>Adjust — '+label+'</strong><button class="modal-close" onclick="closeModal()">×</button></div>'+
+      '<div class="modal-body">'+
+        '<div class="kv"><div>User</div><div>'+esc(u2.name)+' ('+esc(u2.email)+')</div>'+
+        '<div>Current</div><div>'+fmtN(u2[field])+'</div></div>'+
+        '<label class="lbl">Amount (+ to add, − to subtract)</label>'+
+        '<input id="ab-delta" type="number" placeholder="e.g. 5000 or -2500" />'+
+        '<label class="lbl">Reason (required, logged to audit)</label>'+
+        '<input id="ab-reason" placeholder="e.g. correction for disputed task" />'+
+        '<p class="muted" style="font-size:12px;">This writes to the user balance and adds a ledger entry.</p>'+
+      '</div>'+
+      '<div class="modal-foot"><button class="btn btn-ghost" onclick="closeModal()">Cancel</button><button class="btn btn-primary" onclick="adjustBalance()">Apply adjustment</button></div>'+
+    '</div></div>';
+  }
+  return "";
+}
+
+function render(){
+  var body;
+  if(!state.admin) body=renderLogin();
+  else body='<div class="hero"><h2>Admin control room</h2><p>Read and edit every user, task, submission, deposit, and withdrawal. Every money edit is logged.</p>'+
+    '<div style="margin-top:12px;"><button class="btn btn-ghost btn-sm" onclick="runSweep()">Run 24-hour sweep</button> <button class="btn btn-ghost btn-sm" onclick="refreshAll().then(render)">Refresh data</button></div></div>'+
+    renderTabs()+renderAdminBody();
+
+  document.getElementById("root").innerHTML=renderTopBar()+'<div>'+body+'</div>'+renderModal()+'<div id="toast" class="toast" style="display:none;"></div>';
+  renderDrawer();
+
+  var si=document.getElementById("user-search");
+  if(si){
+    si.oninput=function(){ state.search=si.value; var cur=si.selectionStart; render(); var n=document.getElementById("user-search"); if(n){n.focus(); try{n.setSelectionRange(cur,cur)}catch(e){}} };
+  }
+  if(!render._hooked){
+    render._hooked=true;
+    window.addEventListener("keydown",function(e){ if(e.key==="Escape"){ if(state.modal) closeModal(); else closeDrawer() } });
+  }
+}
+
+(async function boot(){
+  var s=getSession();
+  if(s&&s.userId){
+    state.admin={id:s.userId};
+    await loadAdminProfile();
+    if(state.admin && state.admin.is_admin){
+      await refreshAll();
+    } else {
+      state.admin=null;
+      setSession(null);
+    }
+  }
+  render();
+})();
+</script>
+</body>
+</html>

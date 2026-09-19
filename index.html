@@ -165,8 +165,6 @@
   .support-card .sub{font-size:12px;color:var(--slate-400);margin-top:4px}
   .support-card.wa{border-left:4px solid #25d366}
   .support-card.tg{border-left:4px solid #0088cc}
-  .copy-row{display:flex;gap:8px;align-items:center;margin:6px 0 14px}
-  .copy-row input{margin:0;flex:1;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:13px}
   .kv{display:grid;grid-template-columns:180px 1fr;gap:10px 16px;font-size:14px}
   .kv > div:nth-child(odd){color:var(--slate-500);font-weight:600}
   .kv > div:nth-child(even){word-break:break-word}
@@ -201,7 +199,7 @@
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script>
 /* ============================================================
-   TaskLoop — main app (Piece 7B)
+   TaskLoop — main app (fixed: withdrawals loader added)
    ============================================================ */
 
 var SUPABASE_URL = "https://jcajknuldlkuwtxhymbt.supabase.co";
@@ -224,8 +222,6 @@ var CATEGORIES = {
 var MIN_TASK_QTY = 20;
 var TARGET_ON_PAGE_MS = 4000;
 var WALLET_PRESETS = [5000, 10000, 25000, 50000, 100000];
-
-/* Fallback bank in case platform_settings has not been set */
 var DEFAULT_BANK = { number:"5012652807", name:"PEER PULSE TECHNOLOGY", bank:"Safe Haven MFB" };
 
 function uid(){return Math.random().toString(36).slice(2)+Date.now().toString(36)}
@@ -266,8 +262,6 @@ function isWithdrawDayToday(type, settings){
   if(allDow) return arr.indexOf(today.getDay())!==-1;
   return arr.indexOf(today.getDate())!==-1;
 }
-
-/* Bank helper — reads from settings, falls back to defaults */
 function bankFor(settings, kind){
   var s = settings || {};
   if(kind==="wallet"){
@@ -289,7 +283,9 @@ function getSession(){ try{ return JSON.parse(localStorage.getItem(SESSION_KEY)|
 function setSession(s){ if(s) localStorage.setItem(SESSION_KEY, JSON.stringify(s)); else localStorage.removeItem(SESSION_KEY); }
 
 var state = {
-  user: null, tasks: [], submissions: [], ledger: [], notifications: [],
+  user: null,
+  tasks: [], submissions: [], ledger: [], notifications: [],
+  withdrawals: [],           /* <— THE FIX */
   settings: null, payoutMethods: [], support: null, referrals: [],
   route: "loading",
   activeStart: null,
@@ -475,6 +471,13 @@ async function loadLedger(){
     state.ledger = data||[];
   }catch(e){ state.ledger=[] }
 }
+async function loadWithdrawals(){
+  if(!state.user) return;
+  try{
+    var {data} = await sb.from("withdrawals").select("*").eq("user_id",state.user.id).order("ts",{ascending:false});
+    state.withdrawals = data||[];
+  }catch(e){ state.withdrawals=[] }
+}
 async function loadReferrals(){
   if(!state.user) return;
   try{
@@ -520,7 +523,7 @@ async function loadSupport(){
 async function refreshAll(){
   await loadUser();
   await Promise.all([
-    loadTasks(), loadSubmissions(), loadLedger(),
+    loadTasks(), loadSubmissions(), loadLedger(), loadWithdrawals(),
     loadNotifications(), loadSettings(), loadPayoutMethods(),
     loadSupport(), loadReferrals()
   ]);
@@ -884,27 +887,29 @@ function renderDashboard(){
   '</div>';
 }
 
-/* ---------- MY ACCOUNT (new) ---------- */
 function renderMyAccount(){
   var user=state.user;
   var tier=tierById(user.tier_id);
   var refLink = window.location.origin + window.location.pathname + "?ref=" + (user.ref_code||"");
 
-  // Lifetime stats
-  var taskEarned = 0, affEarned = 0;
-  state.ledger.forEach(function(l){
+  var ledger = state.ledger || [];
+  var submissions = state.submissions || [];
+  var withdrawals = state.withdrawals || [];
+  var referrals = state.referrals || [];
+
+  var taskEarned=0, affEarned=0;
+  ledger.forEach(function(l){
     var amt=Number(l.amount)||0;
     if(l.type==="task" && amt>0) taskEarned+=amt;
     if(l.type==="affiliate" && amt>0) affEarned+=amt;
   });
-  var withdrawn = state.ledger.filter(function(l){return (l.note||"").toLowerCase().indexOf("withdrawal")!==-1 && Number(l.amount)<0})
-                              .reduce(function(s,l){return s+Math.abs(Number(l.amount))}, 0);
-  var pendingWd = state.withdrawals.filter(function(w){return w.user_id===user.id && w.status==="pending"})
-                                  .reduce(function(s,w){return s+Number(w.amount)}, 0);
-  var approvedSubs = state.submissions.filter(function(s){return s.status==="approved"}).length;
-
-  var referralsEarned = state.ledger.filter(function(l){return l.type==="affiliate" && Number(l.amount)>0})
-                                    .reduce(function(s,l){return s+Number(l.amount)},0);
+  var withdrawn = ledger.filter(function(l){return (l.note||"").toLowerCase().indexOf("withdrawal")!==-1 && Number(l.amount)<0})
+                        .reduce(function(s,l){return s+Math.abs(Number(l.amount))}, 0);
+  var pendingWd = withdrawals.filter(function(w){return w.status==="pending"})
+                             .reduce(function(s,w){return s+Number(w.amount)}, 0);
+  var approvedSubs = submissions.filter(function(s){return s.status==="approved"}).length;
+  var referralsEarned = ledger.filter(function(l){return l.type==="affiliate" && Number(l.amount)>0})
+                              .reduce(function(s,l){return s+Number(l.amount)},0);
 
   return '<div class="card wide" style="max-width:820px;">'+
     '<h2 style="margin-top:0;">My Account</h2>'+
@@ -926,16 +931,16 @@ function renderMyAccount(){
       '<div class="kv">'+
         '<div>Referral code</div><div style="font-weight:700;">'+esc(user.ref_code||"")+'</div>'+
         '<div>Referral link</div><div style="word-break:break-all;font-size:12px;">'+esc(refLink)+'</div>'+
-        '<div>Friends referred</div><div>'+state.referrals.length+'</div>'+
+        '<div>Friends referred</div><div>'+referrals.length+'</div>'+
         '<div>Total earned from referrals</div><div>'+fmtN(referralsEarned)+'</div>'+
       '</div>'+
       '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px;">'+
         '<button class="btn btn-ghost btn-sm" onclick="copyText(\''+user.ref_code+'\',\'Referral code\')">Copy code</button>'+
         '<button class="btn btn-ghost btn-sm" onclick="copyText(\''+refLink+'\',\'Referral link\')">Copy link</button>'+
       '</div>'+
-      (state.referrals.length?
+      (referrals.length?
         '<h4 style="margin:16px 0 4px;font-size:13px;color:var(--slate-700);">Your referrals</h4>'+
-        state.referrals.map(function(r){
+        referrals.map(function(r){
           return '<div class="row"><div><strong>'+esc(r.name)+'</strong><div class="muted" style="font-size:12px;">joined '+new Date(Number(r.created_at)).toLocaleDateString()+'</div></div></div>';
         }).join("")
         : '<p class="muted" style="font-size:13px;">You have not referred anyone yet. Share your link to start earning 10% of their task earnings forever.</p>'
@@ -1004,7 +1009,7 @@ function renderTaskDetail(){
 }
 
 function renderSubmissions(){
-  var mine=state.submissions;
+  var mine=state.submissions||[];
   var rows=mine.length===0?'<p class="muted">No submissions yet.</p>':mine.map(function(s){
     var task=state.tasks.filter(function(t){return t.id===s.task_id})[0];
     var color=s.status==="approved"?"#16a34a":s.status==="rejected"?"#dc2626":"#d97706";
@@ -1041,7 +1046,7 @@ function ledgerLabel(k){
 
 function renderWallet(){
   var user=state.user;
-  var ledger=state.ledger;
+  var ledger=state.ledger||[];
   var filter=state.ledgerFilter||"all";
   var filtered = filter==="all" ? ledger : ledger.filter(function(l){return ledgerKind(l)===filter});
   var ledgerHtml=filtered.length===0?'<p class="muted">No transactions in this category.</p>':filtered.map(function(l){
@@ -1064,7 +1069,7 @@ function renderWallet(){
   var nextTask = nextWithdrawDate("task", state.settings);
   var nextAff  = nextWithdrawDate("affiliate", state.settings);
 
-  var approvedPayout = state.payoutMethods.filter(function(m){return m.status==="approved"})[0];
+  var approvedPayout = (state.payoutMethods||[]).filter(function(m){return m.status==="approved"})[0];
 
   var withdrawBlock = "";
   if(!approvedPayout){
@@ -1106,7 +1111,7 @@ function renderWallet(){
 
 function renderPayout(){
   var user=state.user;
-  var mine = state.payoutMethods;
+  var mine = state.payoutMethods||[];
   var approved = mine.filter(function(m){return m.status==="approved"})[0];
   var pending = mine.filter(function(m){return m.status==="pending"})[0];
   var html="";

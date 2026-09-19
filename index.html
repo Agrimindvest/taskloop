@@ -117,6 +117,7 @@
   .btn-danger{background:var(--danger-bg);color:#b91c1c}
   .btn-ghost{background:transparent;color:var(--teal-700);border:1px solid var(--teal-500)}
   .btn-full{width:100%;margin-top:16px}
+  .btn-sm{padding:8px 12px;font-size:13px}
   .pill{display:inline-block;padding:4px 11px;border-radius:999px;color:#fff;font-size:12px;font-weight:700;letter-spacing:.02em}
   .steps{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:18px;margin-top:26px}
   .step-card{background:rgba(255,255,255,.9);border:1px solid rgba(226,232,240,.9);border-radius:var(--radius);padding:22px;
@@ -164,6 +165,14 @@
   .support-card .sub{font-size:12px;color:var(--slate-400);margin-top:4px}
   .support-card.wa{border-left:4px solid #25d366}
   .support-card.tg{border-left:4px solid #0088cc}
+  .copy-row{display:flex;gap:8px;align-items:center;margin:6px 0 14px}
+  .copy-row input{margin:0;flex:1;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:13px}
+  .kv{display:grid;grid-template-columns:180px 1fr;gap:10px 16px;font-size:14px}
+  .kv > div:nth-child(odd){color:var(--slate-500);font-weight:600}
+  .kv > div:nth-child(even){word-break:break-word}
+  .section{border-bottom:1px solid var(--slate-200);padding:16px 0}
+  .section:last-child{border-bottom:none}
+  .section h3{margin:0 0 12px;font-size:15px;color:var(--slate-800)}
 </style>
 </head>
 <body>
@@ -192,7 +201,7 @@
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script>
 /* ============================================================
-   TaskLoop — main app
+   TaskLoop — main app (Piece 7B)
    ============================================================ */
 
 var SUPABASE_URL = "https://jcajknuldlkuwtxhymbt.supabase.co";
@@ -214,9 +223,10 @@ var CATEGORIES = {
 };
 var MIN_TASK_QTY = 20;
 var TARGET_ON_PAGE_MS = 4000;
-var BANK = { number:"5012652807", name:"PEER PULSE TECHNOLOGY", bank:"Safe Haven MFB" };
 var WALLET_PRESETS = [5000, 10000, 25000, 50000, 100000];
-var DAY_NAMES = ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
+
+/* Fallback bank in case platform_settings has not been set */
+var DEFAULT_BANK = { number:"5012652807", name:"PEER PULSE TECHNOLOGY", bank:"Safe Haven MFB" };
 
 function uid(){return Math.random().toString(36).slice(2)+Date.now().toString(36)}
 function fmtN(n){return "\u20A6"+Number(n||0).toLocaleString("en-NG")}
@@ -232,7 +242,6 @@ function isBlockedDay(settings){
   if(settings.blocked_dates && settings.blocked_dates.indexOf(today)!==-1) return true;
   return false;
 }
-
 function nextWithdrawDate(type, settings){
   if(!settings) return "—";
   var arr = type==="task" ? settings.withdraw_task_days : settings.withdraw_affiliate_days;
@@ -258,13 +267,30 @@ function isWithdrawDayToday(type, settings){
   return arr.indexOf(today.getDate())!==-1;
 }
 
+/* Bank helper — reads from settings, falls back to defaults */
+function bankFor(settings, kind){
+  var s = settings || {};
+  if(kind==="wallet"){
+    return {
+      number: s.wallet_bank_number || DEFAULT_BANK.number,
+      name:   s.wallet_bank_name   || DEFAULT_BANK.name,
+      bank:   s.wallet_bank_label  || DEFAULT_BANK.bank
+    };
+  }
+  return {
+    number: s.tier_bank_number || DEFAULT_BANK.number,
+    name:   s.tier_bank_name   || DEFAULT_BANK.name,
+    bank:   s.tier_bank_label  || DEFAULT_BANK.bank
+  };
+}
+
 var SESSION_KEY = "taskloop_session";
 function getSession(){ try{ return JSON.parse(localStorage.getItem(SESSION_KEY)||"null") }catch(e){ return null } }
 function setSession(s){ if(s) localStorage.setItem(SESSION_KEY, JSON.stringify(s)); else localStorage.removeItem(SESSION_KEY); }
 
 var state = {
   user: null, tasks: [], submissions: [], ledger: [], notifications: [],
-  settings: null, payoutMethods: [], support: null,
+  settings: null, payoutMethods: [], support: null, referrals: [],
   route: "loading",
   activeStart: null,
   upgradeStage: "select", upgradeTierId: "starter",
@@ -286,7 +312,6 @@ function notify(msg,kind){
   toastTimer=setTimeout(function(){el.style.display="none"},4000);
 }
 
-/* ---------- BROWSER NOTIFICATIONS ---------- */
 function maybeAskNotifPermission(){
   if(state._askedNotifPerm) return;
   state._askedNotifPerm = true;
@@ -299,7 +324,7 @@ function fireBrowserNotif(n){
   if(!("Notification" in window)) return;
   if(Notification.permission !== "granted") return;
   try{
-    var notif = new Notification(n.title, { body: n.body || "", tag: n.id, icon: "" });
+    var notif = new Notification(n.title, { body: n.body || "", tag: n.id });
     notif.onclick = function(){ window.focus(); try{ notif.close(); }catch(e){} };
   }catch(e){}
 }
@@ -321,6 +346,7 @@ function iconFor(name){
     upgrade:'<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 2l3 7 7 .5-5.5 4.5L18 21l-6-3.5L6 21l1.5-7L2 9.5 9 9z"/></svg>',
     createTask:'<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>',
     myTasks:'<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 5h18M3 12h18M3 19h12"/></svg>',
+    account:'<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="8" r="4"/><path d="M4 21v-2a6 6 0 0 1 6-6h4a6 6 0 0 1 6 6v2"/></svg>',
     settings:'<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.6 1.6 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.6 1.6 0 0 0-1.8-.3 1.6 1.6 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1A1.6 1.6 0 0 0 9 19.4a1.6 1.6 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.6 1.6 0 0 0 .3-1.8 1.6 1.6 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1A1.6 1.6 0 0 0 4.6 9a1.6 1.6 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.6 1.6 0 0 0 1.8.3H9a1.6 1.6 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1A1.6 1.6 0 0 0 15 4.6a1.6 1.6 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.6 1.6 0 0 0-.3 1.8V9a1.6 1.6 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.6 1.6 0 0 0-1.5 1z"/></svg>',
     logout:'<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="M16 17l5-5-5-5"/><path d="M21 12H9"/></svg>',
     home:'<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 10.5L12 3l9 7.5V21a1 1 0 0 1-1 1h-6v-7h-4v7H4a1 1 0 0 1-1-1z"/></svg>',
@@ -339,6 +365,7 @@ function renderDrawer(){
     items.push(item("login","Log in","login"));
   } else {
     items.push(item("dashboard","Dashboard","dashboard"));
+    items.push(item("account","My Account","myAccount"));
     items.push(item("submissions","My submissions","submissions"));
     items.push(item("wallet","Wallet","wallet"));
     items.push(item("payout","Payout method","payout"));
@@ -360,6 +387,10 @@ function copyRef(){
   if(!state.user) return;
   try{ navigator.clipboard.writeText(state.user.ref_code); notify("Referral code copied","success") }catch(e){ notify(state.user.ref_code,"info") }
   closeDrawer();
+}
+function copyText(text,label){
+  try{ navigator.clipboard.writeText(text); notify((label||"Copied")+" copied","success") }
+  catch(e){ notify(text,"info") }
 }
 
 function go(r){ state.route=r; state.notifPanelOpen=false; render() }
@@ -444,17 +475,21 @@ async function loadLedger(){
     state.ledger = data||[];
   }catch(e){ state.ledger=[] }
 }
+async function loadReferrals(){
+  if(!state.user) return;
+  try{
+    var {data} = await sb.from("users").select("id,name,ref_code,created_at").eq("referred_by",state.user.id);
+    state.referrals = data||[];
+  }catch(e){ state.referrals=[] }
+}
 async function loadNotifications(){
   if(!state.user) return;
   try{
     var {data} = await sb.from("notifications").select("*").eq("user_id",state.user.id).order("ts",{ascending:false}).limit(50);
     var incoming = data||[];
-    // Detect new notifications to fire browser popups
     if(state._lastNotifId){
       var known = state._lastNotifId;
-      var fresh = incoming.filter(function(n){
-        return Number(n.ts) > known && !n.read;
-      });
+      var fresh = incoming.filter(function(n){ return Number(n.ts) > known && !n.read; });
       fresh.forEach(function(n){ fireBrowserNotif(n); });
     }
     if(incoming.length){
@@ -486,7 +521,8 @@ async function refreshAll(){
   await loadUser();
   await Promise.all([
     loadTasks(), loadSubmissions(), loadLedger(),
-    loadNotifications(), loadSettings(), loadPayoutMethods(), loadSupport()
+    loadNotifications(), loadSettings(), loadPayoutMethods(),
+    loadSupport(), loadReferrals()
   ]);
 }
 
@@ -561,7 +597,6 @@ async function requestWithdrawal(){
   }catch(e){ notify(e.message||"Could not request","error") }
 }
 
-/* ---------- PAYOUT METHOD ---------- */
 function openPayoutForm(){ state.payoutStage="form"; render() }
 function cancelPayoutForm(){ state.payoutStage="view"; render() }
 async function submitPayoutMethod(){
@@ -581,7 +616,6 @@ async function submitPayoutMethod(){
   }catch(e){ notify(e.message||"Could not submit","error") }
 }
 
-/* ---------- WALLET FUNDING ---------- */
 function chooseWalletAmount(a){ state.walletAmount=a; render() }
 function revealWalletBank(){
   state.walletStage="loading"; render();
@@ -604,7 +638,6 @@ async function submitWalletFund(){
   }catch(e){ notify(e.message||"Could not submit","error") }
 }
 
-/* ---------- TIER UPGRADE ---------- */
 function chooseUpgradeTier(id){ state.upgradeTierId=id; render() }
 function revealBank(){
   state.upgradeStage="loading"; render();
@@ -624,7 +657,6 @@ async function submitDepositClaim(){
   }catch(e){ notify(e.message||"Could not submit claim","error") }
 }
 
-/* ---------- ADVERTISER ---------- */
 function onCategoryChange(){
   var c=document.getElementById("ct-category").value;
   var cat=CATEGORIES[c];
@@ -844,10 +876,112 @@ function renderDashboard(){
       '<div class="stat"><div class="stat-label">Tier</div><div class="stat-value">'+tier.name+'</div></div>'+
     '</div>'+
     '<div style="display:flex; gap:8px; margin-top:14px; flex-wrap:wrap;">'+
-      '<button class="btn btn-primary" onclick="go(\'fundWallet\')">Fund wallet</button>'+
+      '<button class="btn btn-primary" onclick="go(\'myAccount\')">My Account</button>'+
+      '<button class="btn btn-ghost" onclick="go(\'fundWallet\')">Fund wallet</button>'+
       '<button class="btn btn-ghost" onclick="go(\'createTask\')">Post a task</button>'+
     '</div>'+
     '<h2 style="margin-top:28px;">Available tasks</h2>'+tasksHtml+
+  '</div>';
+}
+
+/* ---------- MY ACCOUNT (new) ---------- */
+function renderMyAccount(){
+  var user=state.user;
+  var tier=tierById(user.tier_id);
+  var refLink = window.location.origin + window.location.pathname + "?ref=" + (user.ref_code||"");
+
+  // Lifetime stats
+  var taskEarned = 0, affEarned = 0;
+  state.ledger.forEach(function(l){
+    var amt=Number(l.amount)||0;
+    if(l.type==="task" && amt>0) taskEarned+=amt;
+    if(l.type==="affiliate" && amt>0) affEarned+=amt;
+  });
+  var withdrawn = state.ledger.filter(function(l){return (l.note||"").toLowerCase().indexOf("withdrawal")!==-1 && Number(l.amount)<0})
+                              .reduce(function(s,l){return s+Math.abs(Number(l.amount))}, 0);
+  var pendingWd = state.withdrawals.filter(function(w){return w.user_id===user.id && w.status==="pending"})
+                                  .reduce(function(s,w){return s+Number(w.amount)}, 0);
+  var approvedSubs = state.submissions.filter(function(s){return s.status==="approved"}).length;
+
+  var referralsEarned = state.ledger.filter(function(l){return l.type==="affiliate" && Number(l.amount)>0})
+                                    .reduce(function(s,l){return s+Number(l.amount)},0);
+
+  return '<div class="card wide" style="max-width:820px;">'+
+    '<h2 style="margin-top:0;">My Account</h2>'+
+    '<p class="muted" style="font-size:13px;">Everything about your TaskLoop account, in one place.</p>'+
+
+    '<div class="section">'+
+      '<h3>Identity</h3>'+
+      '<div class="kv">'+
+        '<div>Name</div><div>'+esc(user.name)+'</div>'+
+        '<div>Email</div><div>'+esc(user.email)+'</div>'+
+        '<div>User ID</div><div style="word-break:break-all;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12px;">'+esc(user.id)+'</div>'+
+        '<div>Joined</div><div>'+new Date(Number(user.created_at)).toLocaleString()+'</div>'+
+      '</div>'+
+      '<button class="btn btn-ghost btn-sm" onclick="copyText(\''+user.id+'\',\'User ID\')">Copy User ID</button>'+
+    '</div>'+
+
+    '<div class="section">'+
+      '<h3>Referral program</h3>'+
+      '<div class="kv">'+
+        '<div>Referral code</div><div style="font-weight:700;">'+esc(user.ref_code||"")+'</div>'+
+        '<div>Referral link</div><div style="word-break:break-all;font-size:12px;">'+esc(refLink)+'</div>'+
+        '<div>Friends referred</div><div>'+state.referrals.length+'</div>'+
+        '<div>Total earned from referrals</div><div>'+fmtN(referralsEarned)+'</div>'+
+      '</div>'+
+      '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px;">'+
+        '<button class="btn btn-ghost btn-sm" onclick="copyText(\''+user.ref_code+'\',\'Referral code\')">Copy code</button>'+
+        '<button class="btn btn-ghost btn-sm" onclick="copyText(\''+refLink+'\',\'Referral link\')">Copy link</button>'+
+      '</div>'+
+      (state.referrals.length?
+        '<h4 style="margin:16px 0 4px;font-size:13px;color:var(--slate-700);">Your referrals</h4>'+
+        state.referrals.map(function(r){
+          return '<div class="row"><div><strong>'+esc(r.name)+'</strong><div class="muted" style="font-size:12px;">joined '+new Date(Number(r.created_at)).toLocaleDateString()+'</div></div></div>';
+        }).join("")
+        : '<p class="muted" style="font-size:13px;">You have not referred anyone yet. Share your link to start earning 10% of their task earnings forever.</p>'
+      )+
+    '</div>'+
+
+    '<div class="section">'+
+      '<h3>Tier</h3>'+
+      '<div class="kv">'+
+        '<div>Current tier</div><div><span class="pill" style="background:var(--teal-600);">'+tier.name+'</span></div>'+
+        '<div>Tier fee</div><div>'+fmtN(tier.fee)+'</div>'+
+      '</div>'+
+      '<a href="#" onclick="go(\'upgrade\');return false;" class="btn btn-ghost btn-sm">'+(user.tier_id==="free"?"Upgrade":"Change tier")+'</a>'+
+    '</div>'+
+
+    '<div class="section">'+
+      '<h3>Balances</h3>'+
+      '<div class="stats-row">'+
+        '<div class="stat"><div class="stat-label">Task balance</div><div class="stat-value">'+fmtN(user.task_balance)+'</div></div>'+
+        '<div class="stat"><div class="stat-label">Advertiser balance</div><div class="stat-value">'+fmtN(user.advertiser_balance)+'</div></div>'+
+        '<div class="stat"><div class="stat-label">Affiliate balance</div><div class="stat-value">'+fmtN(user.affiliate_balance)+'</div></div>'+
+      '</div>'+
+    '</div>'+
+
+    '<div class="section">'+
+      '<h3>Lifetime earnings & activity</h3>'+
+      '<div class="kv">'+
+        '<div>Task earnings (lifetime)</div><div>'+fmtN(taskEarned)+'</div>'+
+        '<div>Referral earnings (lifetime)</div><div>'+fmtN(affEarned)+'</div>'+
+        '<div>Total earned</div><div style="font-weight:700;">'+fmtN(taskEarned + affEarned)+'</div>'+
+        '<div>Tasks completed</div><div>'+approvedSubs+'</div>'+
+        '<div>Total withdrawn</div><div>'+fmtN(withdrawn)+'</div>'+
+        '<div>Pending withdrawal</div><div>'+fmtN(pendingWd)+'</div>'+
+      '</div>'+
+      '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px;">'+
+        '<a href="#" onclick="go(\'wallet\');return false;" class="btn btn-ghost btn-sm">Open wallet</a>'+
+        '<a href="#" onclick="go(\'submissions\');return false;" class="btn btn-ghost btn-sm">My submissions</a>'+
+        '<a href="#" onclick="go(\'payout\');return false;" class="btn btn-ghost btn-sm">Payout method</a>'+
+      '</div>'+
+    '</div>'+
+
+    '<div class="section">'+
+      '<h3>Need help?</h3>'+
+      '<p class="muted" style="font-size:13px;">Share your User ID with support when contacting us so we can find your account instantly.</p>'+
+      '<a href="#" onclick="go(\'support\');return false;" class="btn btn-ghost btn-sm">Open Support page</a>'+
+    '</div>'+
   '</div>';
 }
 
@@ -922,8 +1056,6 @@ function renderWallet(){
   var filters=["all","task","affiliate","funding","task_funding","refund","withdrawal","tier","adjustment"];
   var filterOpts=filters.map(function(f){return '<option value="'+f+'"'+(filter===f?" selected":"")+'>'+ledgerLabel(f)+'</option>'}).join("");
 
-  // Withdrawal availability
-  var wtype="task";
   var minTask = Number((state.settings&&state.settings.withdraw_min_task)||10000);
   var minAff  = Number((state.settings&&state.settings.withdraw_min_affiliate)||1000);
   var feePct  = Number((state.settings&&state.settings.withdraw_fee_pct)||0.2);
@@ -944,10 +1076,10 @@ function renderWallet(){
         '<option value="affiliate">Affiliate earnings — min '+fmtN(minAff)+' — next '+nextAff+'</option>'+
       '</select>'+
       '<input id="wd-amount" type="number" placeholder="Amount" />'+
-      '<p class="muted" style="font-size:12px;">Fee: '+(feePct*100).toFixed(0)+'% of the amount. Processed to your approved bank: '+esc(approvedPayout.bank_name)+' ••••'+esc(approvedPayout.account_number.slice(-4))+'</p>';
+      '<p class="muted" style="font-size:12px;">Fee: '+(feePct*100).toFixed(0)+'% of the amount. Paid to your approved bank: '+esc(approvedPayout.bank_name)+' ••••'+esc(approvedPayout.account_number.slice(-4))+'</p>';
     if(!canTask && !canAff){
       withdrawBlock += '<button class="btn btn-amber btn-full" disabled>Withdrawals closed today</button>'+
-        '<p class="muted" style="font-size:12px;">Task earnings: next '+nextTask+' &middot; Affiliate: next '+nextAff+'</p>';
+        '<p class="muted" style="font-size:12px;">Task: next '+nextTask+' &middot; Affiliate: next '+nextAff+'</p>';
     } else {
       withdrawBlock += '<button class="btn btn-amber btn-full" onclick="requestWithdrawal()">Request withdrawal</button>';
     }
@@ -961,10 +1093,10 @@ function renderWallet(){
     '<div style="display:flex;gap:8px;margin-top:14px;flex-wrap:wrap;">'+
       '<button class="btn btn-primary" onclick="go(\'fundWallet\')">Fund wallet</button>'+
       '<button class="btn btn-ghost" onclick="go(\'payout\')">Payout method</button>'+
+      '<button class="btn btn-ghost" onclick="go(\'myAccount\')">My Account</button>'+
     '</div>'+
     '<div class="card wide" style="margin-top:20px;">'+
       '<h3>Withdraw earnings</h3>'+
-      '<p class="muted" style="font-size:13px;">'+(feePct*100).toFixed(0)+'% fee. Task earnings: '+(state.settings&&state.settings.withdraw_task_days&&state.settings.withdraw_task_days.join(", ")||"as configured")+'. Affiliate: '+(state.settings&&state.settings.withdraw_affiliate_days&&state.settings.withdraw_affiliate_days.join(", ")||"Mon/Wed/Fri")+'.</p>'+
       withdrawBlock+
     '</div>'+
     '<h3 style="margin-top:24px;">Transaction history</h3>'+
@@ -992,9 +1124,9 @@ function renderPayout(){
         '<div class="muted" style="font-size:12px;">Account name: '+esc(approved.account_name)+'</div>'+
       '</div>'+
       '<button class="btn btn-ghost btn-full" onclick="openPayoutForm()">Request change</button>'+
-      '<p class="muted" style="font-size:12px;">To change your bank account, submit a new one. It will replace the current one once admin approves. Contact support if you need help.</p>';
+      '<p class="muted" style="font-size:12px;">To change your bank account, submit a new one. Admin approval required.</p>';
     } else if(pending){
-      html += '<div class="banner" style="background:#fef3c7;color:#92400e;">You have a payout method pending admin approval.</div>'+
+      html += '<div class="banner" style="background:#fef3c7;color:#92400e;">Your payout method is pending admin approval.</div>'+
         '<div class="row" style="flex-direction:column;align-items:stretch;">'+
           '<strong>'+esc(pending.bank_name)+' — ••••'+esc(pending.account_number.slice(-4))+'</strong>'+
           '<div class="muted" style="font-size:12px;">Submitted '+new Date(Number(pending.ts)).toLocaleString()+'</div>'+
@@ -1004,7 +1136,6 @@ function renderPayout(){
       html += '<p class="muted">You have not added a payout method yet.</p>'+
         '<button class="btn btn-primary btn-full" onclick="openPayoutForm()">Add payout method</button>';
     }
-    // History
     var history = mine.filter(function(m){return m.status!=="approved"}).slice(0,5);
     if(history.length){
       html += '<h3 style="margin-top:22px;">History</h3>';
@@ -1060,6 +1191,7 @@ function renderSupport(){
 function renderFundWallet(){
   var stage=state.walletStage;
   var amount=state.walletAmount;
+  var bank = bankFor(state.settings, "wallet");
   var presets=WALLET_PRESETS.map(function(p){
     return '<button class="amount-btn'+(amount===p?' selected':'')+'" onclick="chooseWalletAmount('+p+')">'+fmtN(p)+'</button>';
   }).join("");
@@ -1074,9 +1206,9 @@ function renderFundWallet(){
     html='<p class="center" style="padding:30px;color:#0d9488;">Please hold on, generating your bank…</p>';
   } else if(stage==="bank"){
     html='<div style="background:linear-gradient(135deg, rgba(20,184,166,.10), rgba(251,191,36,.06)); border:1px solid rgba(20,184,166,.25); border-radius:12px; padding:18px; margin-top:12px;">'+
-      '<div>Account number: <strong>'+BANK.number+'</strong></div>'+
-      '<div>Account name: <strong>'+BANK.name+'</strong></div>'+
-      '<div>Bank: <strong>'+BANK.bank+'</strong></div>'+
+      '<div>Account number: <strong>'+esc(bank.number)+'</strong></div>'+
+      '<div>Account name: <strong>'+esc(bank.name)+'</strong></div>'+
+      '<div>Bank: <strong>'+esc(bank.bank)+'</strong></div>'+
       '<div style="margin-top:8px;">Amount to send: <strong>'+fmtN(amount)+'</strong></div>'+
       '</div>'+
       '<p class="muted" style="font-size:13px;">Pay externally, then confirm below.</p>'+
@@ -1094,6 +1226,7 @@ function renderFundWallet(){
 
 function renderUpgrade(){
   var tier=tierById(state.upgradeTierId);
+  var bank = bankFor(state.settings, "tier");
   var paid=TIERS.filter(function(t){return t.fee>0});
   var options=paid.map(function(t){return '<option value="'+t.id+'"'+(t.id===state.upgradeTierId?" selected":"")+'>'+t.name+' — '+fmtN(t.fee)+'</option>'}).join("");
   var html="";
@@ -1105,9 +1238,9 @@ function renderUpgrade(){
     html='<p class="center" style="padding:30px;color:#0d9488;">Please hold on, generating your bank…</p>';
   } else if(state.upgradeStage==="bank"){
     html='<div style="background:linear-gradient(135deg, rgba(20,184,166,.10), rgba(251,191,36,.06)); border:1px solid rgba(20,184,166,.25); border-radius:12px; padding:18px; margin-top:12px;">'+
-      '<div>Account number: <strong>'+BANK.number+'</strong></div>'+
-      '<div>Account name: <strong>'+BANK.name+'</strong></div>'+
-      '<div>Bank: <strong>'+BANK.bank+'</strong></div>'+
+      '<div>Account number: <strong>'+esc(bank.number)+'</strong></div>'+
+      '<div>Account name: <strong>'+esc(bank.name)+'</strong></div>'+
+      '<div>Bank: <strong>'+esc(bank.bank)+'</strong></div>'+
       '<div style="margin-top:8px;">Amount: <strong>'+fmtN(tier.fee)+'</strong></div>'+
       '</div>'+
       '<p class="muted" style="font-size:13px;">Pay externally, then confirm below.</p>'+
@@ -1180,13 +1313,28 @@ function renderSettings(){
                 '<span class="muted">not supported</span>';
   return '<div class="card">'+
     '<h2>Account settings</h2>'+
-    '<label class="lbl">Name</label><input value="'+esc(user.name)+'" disabled />'+
-    '<label class="lbl">Email</label><input value="'+esc(user.email)+'" disabled />'+
-    '<label class="lbl">Referral code</label><input value="'+esc(user.ref_code)+'" disabled />'+
-    '<p class="muted" style="font-size:12px;">To change your name or email, contact support.</p>'+
-    '<h3 style="margin-top:22px;">Browser notifications</h3>'+
-    '<p class="muted" style="font-size:13px;">Get a native popup when something happens while the site is open in a background tab. Requires browser permission.</p>'+
-    '<div style="margin-top:8px;">'+permBtn+'</div>'+
+
+    '<div class="section">'+
+      '<h3>Account information</h3>'+
+      '<div class="kv">'+
+        '<div>Name</div><div>'+esc(user.name)+'</div>'+
+        '<div>Email</div><div>'+esc(user.email)+'</div>'+
+        '<div>User ID</div><div style="word-break:break-all;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12px;">'+esc(user.id)+'</div>'+
+        '<div>Joined</div><div>'+new Date(Number(user.created_at)).toLocaleString()+'</div>'+
+      '</div>'+
+      '<div style="display:flex;gap:8px;flex-wrap:wrap;">'+
+        '<button class="btn btn-ghost btn-sm" onclick="copyText(\''+user.id+'\',\'User ID\')">Copy User ID</button>'+
+        '<button class="btn btn-ghost btn-sm" onclick="go(\'myAccount\')">View full account</button>'+
+      '</div>'+
+      '<p class="muted" style="font-size:12px;margin-top:8px;">To change your name or email, contact support. Share your User ID when contacting us.</p>'+
+    '</div>'+
+
+    '<div class="section">'+
+      '<h3>Browser notifications</h3>'+
+      '<p class="muted" style="font-size:13px;">Get native popups when something happens while TaskLoop is open in a background tab.</p>'+
+      '<div style="margin-top:8px;">'+permBtn+'</div>'+
+    '</div>'+
+
     '<button class="btn btn-danger btn-full" onclick="logout()" style="margin-top:22px;">Log out</button>'+
   '</div>';
 }
@@ -1199,6 +1347,7 @@ function render(){
   else if(r==="login") body=renderLogin();
   else if(!user) body=renderLanding();
   else if(r==="dashboard") body=renderDashboard();
+  else if(r==="myAccount") body=renderMyAccount();
   else if(r==="task") body=renderTaskDetail();
   else if(r==="submissions") body=renderSubmissions();
   else if(r==="wallet") body=renderWallet();
@@ -1236,14 +1385,12 @@ function startTaskTimer(){
   },200);
 }
 
-/* Background poll for notifications */
 var notifPollInterval=null;
 function startNotifPolling(){
   clearInterval(notifPollInterval);
   notifPollInterval = setInterval(async function(){
     if(!state.user) return;
     await loadNotifications();
-    // Update just the bell badge without full re-render
     var badge = document.querySelector(".bell-badge");
     var unread = state.notifications.filter(function(n){return !n.read}).length;
     var bell = document.querySelector(".bell");
@@ -1260,7 +1407,6 @@ function startNotifPolling(){
   }, 30000);
 }
 
-/* Close notification panel when clicking elsewhere */
 document.addEventListener("click", function(e){
   if(state.notifPanelOpen && !e.target.closest(".notif-panel") && !e.target.closest(".bell")){
     state.notifPanelOpen=false; render();

@@ -46,7 +46,12 @@
     background-size:300% 100%;-webkit-background-clip:text;background-clip:text;color:transparent;
     animation:tagFlow 8s linear infinite}
   @keyframes tagFlow{0%{background-position:0% 0}100%{background-position:300% 0}}
-  .hamburger{margin-left:auto}
+  .topbar-right{display:flex;align-items:center;gap:8px;margin-left:auto}
+  .bell{position:relative;padding:9px;border-radius:10px;border:1px solid rgba(226,232,240,.9);background:#fff;cursor:pointer;
+    display:flex;align-items:center;justify-content:center;transition:transform .08s ease}
+  .bell:hover{box-shadow:var(--shadow-sm);transform:translateY(-1px)}
+  .bell-badge{position:absolute;top:-4px;right:-4px;background:#dc2626;color:#fff;font-size:10px;font-weight:700;
+    min-width:18px;height:18px;border-radius:999px;display:flex;align-items:center;justify-content:center;padding:0 5px}
   .hamburger button.hb{padding:9px;border-radius:10px;border:1px solid rgba(226,232,240,.9);background:#fff;cursor:pointer;
     display:flex;flex-direction:column;gap:4px;width:42px;height:42px;align-items:center;justify-content:center;transition:transform .08s ease}
   .hamburger button.hb:hover{box-shadow:var(--shadow-sm);transform:translateY(-1px)}
@@ -54,6 +59,21 @@
   .hamburger.open button.hb span:nth-child(1){transform:translateY(6px) rotate(45deg)}
   .hamburger.open button.hb span:nth-child(2){opacity:0}
   .hamburger.open button.hb span:nth-child(3){transform:translateY(-6px) rotate(-45deg)}
+  .notif-panel{position:absolute;top:calc(100% + 8px);right:0;width:380px;max-width:calc(100vw - 40px);
+    background:#fff;border:1px solid var(--slate-200);border-radius:14px;box-shadow:var(--shadow-lg);
+    z-index:200;overflow:hidden}
+  .notif-head{padding:14px 18px;border-bottom:1px solid var(--slate-200);display:flex;justify-content:space-between;align-items:center}
+  .notif-head h3{margin:0;font-size:15px}
+  .notif-head button{background:none;border:none;color:var(--teal-600);cursor:pointer;font-weight:600;font-size:13px}
+  .notif-list{max-height:420px;overflow-y:auto}
+  .notif-item{padding:14px 18px;border-bottom:1px solid var(--slate-100);cursor:pointer;transition:background .12s ease}
+  .notif-item:hover{background:var(--slate-50)}
+  .notif-item.unread{background:linear-gradient(90deg, #f0fdfa, transparent);border-left:3px solid var(--teal-500)}
+  .notif-item .t{font-weight:700;font-size:14px;margin-bottom:2px}
+  .notif-item .b{font-size:13px;color:var(--slate-600);line-height:1.4}
+  .notif-item .m{font-size:11px;color:var(--slate-400);margin-top:4px}
+  .notif-item .kind{padding:1px 7px;border-radius:999px;color:#fff;font-size:10px;font-weight:700;margin-right:6px;text-transform:uppercase}
+  .notif-empty{padding:40px 20px;text-align:center;color:var(--slate-400);font-size:14px}
   .drawer-scrim{position:fixed;inset:0;background:rgba(15,23,42,.35);opacity:0;pointer-events:none;transition:opacity .2s ease;z-index:90}
   .drawer-scrim.open{opacity:1;pointer-events:auto}
   .drawer{position:fixed;top:0;left:0;bottom:0;width:300px;max-width:88vw;background:#fff;z-index:100;
@@ -135,6 +155,15 @@
     font-weight:700;font-size:15px;transition:all .12s ease}
   .amount-btn:hover{border-color:var(--teal-400);box-shadow:var(--shadow-sm)}
   .amount-btn.selected{border-color:var(--teal-600);background:linear-gradient(180deg,var(--teal-50),#fff);color:var(--teal-700)}
+  .support-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:16px;margin-top:18px}
+  .support-card{background:rgba(255,255,255,.94);border:1px solid var(--slate-200);border-radius:var(--radius);padding:20px;
+    box-shadow:var(--shadow-sm);text-decoration:none;color:var(--slate-900);transition:transform .12s ease,box-shadow .2s ease}
+  .support-card:hover{transform:translateY(-3px);box-shadow:var(--shadow)}
+  .support-card .label{font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--slate-500);font-weight:700}
+  .support-card .val{font-size:16px;font-weight:700;margin-top:6px;word-break:break-all}
+  .support-card .sub{font-size:12px;color:var(--slate-400);margin-top:4px}
+  .support-card.wa{border-left:4px solid #25d366}
+  .support-card.tg{border-left:4px solid #0088cc}
 </style>
 </head>
 <body>
@@ -145,7 +174,7 @@
   <div class="drawer-head">
     <svg width="34" height="34" viewBox="0 0 32 32" aria-hidden="true">
       <defs><linearGradient id="dgl" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#14b8a6"/><stop offset="1" stop-color="#0f766e"/></linearGradient></defs>
-      <circle cx="16" cy="16" r="14" fill="none" stroke="url(#dgl)" stroke-width="3"/>
+      <circle cx="16" cy="16" r="13" fill="none" stroke="url(#dgl)" stroke-width="3"/>
       <path d="M22 10 A 8 8 0 1 0 24 16" fill="none" stroke="url(#dgl)" stroke-width="3" stroke-linecap="round"/>
       <path d="M24 16 l-3 -3 l0 6 z" fill="#f59e0b"/>
     </svg>
@@ -163,8 +192,7 @@
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script>
 /* ============================================================
-   TaskLoop — main app (worker + advertiser)
-   Backend: Supabase (Postgres + RLS + SQL functions)
+   TaskLoop — main app
    ============================================================ */
 
 var SUPABASE_URL = "https://jcajknuldlkuwtxhymbt.supabase.co";
@@ -186,26 +214,48 @@ var CATEGORIES = {
 };
 var MIN_TASK_QTY = 20;
 var TARGET_ON_PAGE_MS = 4000;
-var WITHDRAW_FEE = 0.2;
-var WITHDRAW_MIN = { task:10000, affiliate:1000 };
-var WITHDRAW_DAYS = { task:[15], affiliate:[1,3,5] };
 var BANK = { number:"5012652807", name:"PEER PULSE TECHNOLOGY", bank:"Safe Haven MFB" };
 var WALLET_PRESETS = [5000, 10000, 25000, 50000, 100000];
+var DAY_NAMES = ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
 
 function uid(){return Math.random().toString(36).slice(2)+Date.now().toString(36)}
 function fmtN(n){return "\u20A6"+Number(n||0).toLocaleString("en-NG")}
 function tierById(id){for(var i=0;i<TIERS.length;i++)if(TIERS[i].id===id)return TIERS[i];return TIERS[0]}
-function nextWithdrawDate(type){var t=new Date();for(var i=0;i<40;i++){var d=new Date(t);d.setDate(t.getDate()+i);if(type==="task"){if(d.getDate()===15)return d.toDateString()}else{if(WITHDRAW_DAYS.affiliate.indexOf(d.getDay())!==-1)return d.toDateString()}}return "—"}
 function esc(s){var d=document.createElement("div");d.innerText=s==null?"":s;return d.innerHTML}
 function qs(k){return new URLSearchParams(window.location.search).get(k)}
+
 function isBlockedDay(settings){
   if(!settings) return false;
-  var d=new Date();
-  var dow=d.getDay();
+  var d=new Date(); var dow=d.getDay();
   if(settings.blocked_days && settings.blocked_days.indexOf(dow)!==-1) return true;
   var today=d.toISOString().slice(0,10);
   if(settings.blocked_dates && settings.blocked_dates.indexOf(today)!==-1) return true;
   return false;
+}
+
+function nextWithdrawDate(type, settings){
+  if(!settings) return "—";
+  var arr = type==="task" ? settings.withdraw_task_days : settings.withdraw_affiliate_days;
+  if(!arr || !arr.length) return "—";
+  var allDow = true;
+  for(var i=0;i<arr.length;i++) if(arr[i]>6) allDow=false;
+  var today = new Date();
+  for(var d=0; d<60; d++){
+    var dt=new Date(today); dt.setDate(today.getDate()+d);
+    if(allDow){ if(arr.indexOf(dt.getDay())!==-1) return dt.toDateString(); }
+    else { if(arr.indexOf(dt.getDate())!==-1) return dt.toDateString(); }
+  }
+  return "—";
+}
+function isWithdrawDayToday(type, settings){
+  if(!settings) return true;
+  var arr = type==="task" ? settings.withdraw_task_days : settings.withdraw_affiliate_days;
+  if(!arr || !arr.length) return true;
+  var today = new Date();
+  var allDow = true;
+  for(var i=0;i<arr.length;i++) if(arr[i]>6) allDow=false;
+  if(allDow) return arr.indexOf(today.getDay())!==-1;
+  return arr.indexOf(today.getDate())!==-1;
 }
 
 var SESSION_KEY = "taskloop_session";
@@ -213,18 +263,17 @@ function getSession(){ try{ return JSON.parse(localStorage.getItem(SESSION_KEY)|
 function setSession(s){ if(s) localStorage.setItem(SESSION_KEY, JSON.stringify(s)); else localStorage.removeItem(SESSION_KEY); }
 
 var state = {
-  user: null,
-  tasks: [],
-  submissions: [],
-  ledger: [],
-  settings: null,
+  user: null, tasks: [], submissions: [], ledger: [], notifications: [],
+  settings: null, payoutMethods: [], support: null,
   route: "loading",
   activeStart: null,
-  upgradeStage: "select",
-  upgradeTierId: "starter",
-  walletStage: "select",
-  walletAmount: 10000,
-  ledgerFilter: "all"
+  upgradeStage: "select", upgradeTierId: "starter",
+  walletStage: "select", walletAmount: 10000,
+  payoutStage: "view",
+  ledgerFilter: "all",
+  notifPanelOpen: false,
+  _lastNotifId: null,
+  _askedNotifPerm: false
 };
 
 var toastTimer=null;
@@ -237,10 +286,29 @@ function notify(msg,kind){
   toastTimer=setTimeout(function(){el.style.display="none"},4000);
 }
 
+/* ---------- BROWSER NOTIFICATIONS ---------- */
+function maybeAskNotifPermission(){
+  if(state._askedNotifPerm) return;
+  state._askedNotifPerm = true;
+  if(!("Notification" in window)) return;
+  if(Notification.permission === "default"){
+    setTimeout(function(){ try{ Notification.requestPermission(); }catch(e){} }, 3000);
+  }
+}
+function fireBrowserNotif(n){
+  if(!("Notification" in window)) return;
+  if(Notification.permission !== "granted") return;
+  try{
+    var notif = new Notification(n.title, { body: n.body || "", tag: n.id, icon: "" });
+    notif.onclick = function(){ window.focus(); try{ notif.close(); }catch(e){} };
+  }catch(e){}
+}
+
 function openDrawer(){document.getElementById("drawer").classList.add("open");document.getElementById("drawer-scrim").classList.add("open");document.body.style.overflow="hidden"}
 function closeDrawer(){document.getElementById("drawer").classList.remove("open");document.getElementById("drawer-scrim").classList.remove("open");document.body.style.overflow=""}
 function toggleDrawer(){document.getElementById("drawer").classList.contains("open")?closeDrawer():openDrawer()}
-function navTo(r){closeDrawer();state.route=r;render()}
+function navTo(r){closeDrawer();state.notifPanelOpen=false;state.route=r;render()}
+function toggleNotifPanel(){ state.notifPanelOpen = !state.notifPanelOpen; render() }
 
 function iconFor(name){
   var i={
@@ -248,6 +316,8 @@ function iconFor(name){
     submissions:'<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M9 12l2 2 4-4"/><rect x="3" y="4" width="18" height="16" rx="2"/></svg>',
     wallet:'<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="2" y="6" width="20" height="14" rx="2"/><path d="M2 10h20"/></svg>',
     fund:'<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v10M9 10h6M9 14h6"/></svg>',
+    payout:'<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="2" y="6" width="20" height="14" rx="2"/><circle cx="12" cy="13" r="3"/><path d="M6 6V4h12v2"/></svg>',
+    support:'<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 8v.01M12 12v4"/></svg>',
     upgrade:'<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 2l3 7 7 .5-5.5 4.5L18 21l-6-3.5L6 21l1.5-7L2 9.5 9 9z"/></svg>',
     createTask:'<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>',
     myTasks:'<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 5h18M3 12h18M3 19h12"/></svg>',
@@ -259,6 +329,7 @@ function iconFor(name){
   };
   return i[name]||"";
 }
+
 function renderDrawer(){
   var user=state.user, r=state.route, items=[];
   function item(key,label,route){return '<button class="drawer-item'+(r===route?" active":"")+'" onclick="navTo(\''+route+'\')"><span class="ico">'+iconFor(key)+'</span><span>'+label+'</span></button>'}
@@ -270,12 +341,14 @@ function renderDrawer(){
     items.push(item("dashboard","Dashboard","dashboard"));
     items.push(item("submissions","My submissions","submissions"));
     items.push(item("wallet","Wallet","wallet"));
+    items.push(item("payout","Payout method","payout"));
     items.push(item("fund","Fund wallet","fundWallet"));
     items.push(item("upgrade","Upgrade tier","upgrade"));
     items.push('<div class="drawer-sep"></div>');
     items.push(item("createTask","Post a task","createTask"));
     items.push(item("myTasks","My tasks","myTasks"));
     items.push('<div class="drawer-sep"></div>');
+    items.push(item("support","Support","support"));
     items.push(item("settings","Settings","settings"));
     items.push('<button class="drawer-item" onclick="copyRef()"><span class="ico">'+iconFor("wallet")+'</span><span>Copy referral code</span></button>');
     items.push('<div class="drawer-sep"></div>');
@@ -289,7 +362,7 @@ function copyRef(){
   closeDrawer();
 }
 
-function go(r){ state.route=r; render() }
+function go(r){ state.route=r; state.notifPanelOpen=false; render() }
 function logout(){
   setSession(null);
   state.user=null;
@@ -303,21 +376,18 @@ async function doSignup(){
   var password=document.getElementById("su-password").value;
   var role=document.getElementById("su-role").value;
   var ref=document.getElementById("su-ref").value.trim();
-
   if(!name||!email||!password){notify("Fill in every field","error");return}
-
   var btn=document.getElementById("su-btn");
   if(btn){btn.disabled=true;btn.innerHTML='<span class="spinner"></span>Creating…'}
-
   try{
     var {data,error} = await sb.rpc("fn_signup_user",{
       p_name:name, p_email:email, p_password:password, p_role:role, p_ref:ref||null
     });
     if(error) throw new Error(error.message||"Signup failed");
-    var userId = data.userId;
-    setSession({userId:userId});
+    setSession({userId:data.userId});
     await refreshAll();
     notify("Welcome to TaskLoop","success");
+    maybeAskNotifPermission();
     go("dashboard");
   }catch(e){
     notify(e.message||"Signup failed","error");
@@ -329,17 +399,15 @@ async function doLogin(){
   var email=document.getElementById("li-email").value.trim();
   var password=document.getElementById("li-password").value;
   if(!email||!password){notify("Fill in both fields","error");return}
-
   var btn=document.getElementById("li-btn");
   if(btn){btn.disabled=true;btn.innerHTML='<span class="spinner"></span>Signing in…'}
-
   try{
     var {data,error} = await sb.rpc("fn_login_user",{p_email:email,p_password:password});
     if(error) throw new Error(error.message||"Invalid credentials");
-    var userId = data.userId;
-    setSession({userId:userId});
+    setSession({userId:data.userId});
     await refreshAll();
     notify("Welcome back","success");
+    maybeAskNotifPermission();
     go("dashboard");
   }catch(e){
     notify(e.message||"Login failed","error");
@@ -354,9 +422,7 @@ async function loadUser(){
     var {data,error} = await sb.from("users").select("*").eq("id",s.userId).single();
     if(error||!data){ setSession(null); state.user=null; return }
     state.user = data;
-  }catch(e){
-    setSession(null); state.user=null;
-  }
+  }catch(e){ setSession(null); state.user=null; }
 }
 async function loadTasks(){
   try{
@@ -378,15 +444,63 @@ async function loadLedger(){
     state.ledger = data||[];
   }catch(e){ state.ledger=[] }
 }
+async function loadNotifications(){
+  if(!state.user) return;
+  try{
+    var {data} = await sb.from("notifications").select("*").eq("user_id",state.user.id).order("ts",{ascending:false}).limit(50);
+    var incoming = data||[];
+    // Detect new notifications to fire browser popups
+    if(state._lastNotifId){
+      var known = state._lastNotifId;
+      var fresh = incoming.filter(function(n){
+        return Number(n.ts) > known && !n.read;
+      });
+      fresh.forEach(function(n){ fireBrowserNotif(n); });
+    }
+    if(incoming.length){
+      state._lastNotifId = Math.max.apply(null, incoming.map(function(n){return Number(n.ts)}));
+    }
+    state.notifications = incoming;
+  }catch(e){ state.notifications=[] }
+}
 async function loadSettings(){
   try{
     var {data} = await sb.from("platform_settings").select("*").eq("id","main").single();
     state.settings = data||null;
   }catch(e){ state.settings=null }
 }
+async function loadPayoutMethods(){
+  if(!state.user) return;
+  try{
+    var {data} = await sb.from("payout_methods").select("*").eq("user_id",state.user.id).order("ts",{ascending:false});
+    state.payoutMethods = data||[];
+  }catch(e){ state.payoutMethods=[] }
+}
+async function loadSupport(){
+  try{
+    var {data} = await sb.from("support_contacts").select("*").eq("id","main").single();
+    state.support = data||null;
+  }catch(e){ state.support=null }
+}
 async function refreshAll(){
   await loadUser();
-  await Promise.all([loadTasks(),loadSubmissions(),loadLedger(),loadSettings()]);
+  await Promise.all([
+    loadTasks(), loadSubmissions(), loadLedger(),
+    loadNotifications(), loadSettings(), loadPayoutMethods(), loadSupport()
+  ]);
+}
+
+async function markNotifRead(id){
+  if(!state.user) return;
+  await sb.rpc("fn_mark_notification_read",{p_user_id:state.user.id, p_notif_id:id});
+  await loadNotifications();
+  render();
+}
+async function markAllNotifsRead(){
+  if(!state.user) return;
+  await sb.rpc("fn_mark_all_notifications_read",{p_user_id:state.user.id});
+  await loadNotifications();
+  render();
 }
 
 var activeStartTimer=null;
@@ -411,10 +525,8 @@ function onProofFileChange(input){
 async function submitTask(){
   var start=state.activeStart;
   if(!start){notify("No active task","error");return}
-
   var btn=document.getElementById("task-submit-btn");
   if(btn){btn.disabled=true;btn.innerHTML='<span class="spinner"></span>Submitting…'}
-
   try{
     var key = pendingScreenshot ? ("local:"+uid()) : null;
     var {data,error} = await sb.rpc("fn_submit_task",{
@@ -435,38 +547,41 @@ async function submitTask(){
 async function requestWithdrawal(){
   var type=document.getElementById("wd-type").value;
   var amount=Number(document.getElementById("wd-amount").value);
-  if(!amount||amount<WITHDRAW_MIN[type]){notify("Minimum is "+fmtN(WITHDRAW_MIN[type]),"error");return}
+  var min = type==="task" ? Number((state.settings&&state.settings.withdraw_min_task)||10000)
+                          : Number((state.settings&&state.settings.withdraw_min_affiliate)||1000);
+  if(!amount||amount<min){notify("Minimum is "+fmtN(min),"error");return}
   var bf=type==="task"?"task_balance":"affiliate_balance";
   if(Number(state.user[bf])<amount){notify("Insufficient balance","error");return}
   try{
     var {data,error} = await sb.rpc("fn_request_withdrawal",{p_user_id:state.user.id,p_type:type,p_amount:amount});
     if(error) throw new Error(error.message);
     notify("Withdrawal requested — you'll receive "+fmtN(data.net),"success");
-    await loadUser();
+    await refreshAll();
     go("wallet");
   }catch(e){ notify(e.message||"Could not request","error") }
 }
 
-function chooseUpgradeTier(id){ state.upgradeTierId=id; render() }
-function revealBank(){
-  state.upgradeStage="loading"; render();
-  setTimeout(function(){ state.upgradeStage="bank"; render() },1800);
-}
-function goToDepositForm(){ state.upgradeStage="form"; render() }
-async function submitDepositClaim(){
-  var fullName=document.getElementById("dep-name").value.trim();
-  var tierId=document.getElementById("dep-tier").value;
-  if(!fullName){notify("Enter your full name","error");return}
+/* ---------- PAYOUT METHOD ---------- */
+function openPayoutForm(){ state.payoutStage="form"; render() }
+function cancelPayoutForm(){ state.payoutStage="view"; render() }
+async function submitPayoutMethod(){
+  var bank = document.getElementById("pm-bank").value.trim();
+  var acct = document.getElementById("pm-acct").value.trim();
+  var name = document.getElementById("pm-name").value.trim();
+  if(!bank||!acct||!name){notify("Fill in all fields","error");return}
   try{
-    var {data,error} = await sb.rpc("fn_submit_deposit",{p_user_id:state.user.id,p_full_name:fullName,p_tier_id:tierId});
+    var {data,error} = await sb.rpc("fn_submit_payout_method",{
+      p_user_id:state.user.id, p_bank_name:bank, p_account_number:acct, p_account_name:name
+    });
     if(error) throw new Error(error.message);
-    state.upgradeStage="select";
-    notify("Claim submitted — admin will verify","success");
-    go("dashboard");
-  }catch(e){ notify(e.message||"Could not submit claim","error") }
+    notify("Payout method submitted — pending admin approval","success");
+    await loadPayoutMethods();
+    state.payoutStage="view";
+    render();
+  }catch(e){ notify(e.message||"Could not submit","error") }
 }
 
-/* ---------- WALLET FUNDING (new) ---------- */
+/* ---------- WALLET FUNDING ---------- */
 function chooseWalletAmount(a){ state.walletAmount=a; render() }
 function revealWalletBank(){
   state.walletStage="loading"; render();
@@ -489,6 +604,27 @@ async function submitWalletFund(){
   }catch(e){ notify(e.message||"Could not submit","error") }
 }
 
+/* ---------- TIER UPGRADE ---------- */
+function chooseUpgradeTier(id){ state.upgradeTierId=id; render() }
+function revealBank(){
+  state.upgradeStage="loading"; render();
+  setTimeout(function(){ state.upgradeStage="bank"; render() },1800);
+}
+function goToDepositForm(){ state.upgradeStage="form"; render() }
+async function submitDepositClaim(){
+  var fullName=document.getElementById("dep-name").value.trim();
+  var tierId=document.getElementById("dep-tier").value;
+  if(!fullName){notify("Enter your full name","error");return}
+  try{
+    var {data,error} = await sb.rpc("fn_submit_deposit",{p_user_id:state.user.id,p_full_name:fullName,p_tier_id:tierId});
+    if(error) throw new Error(error.message);
+    state.upgradeStage="select";
+    notify("Claim submitted — admin will verify","success");
+    go("dashboard");
+  }catch(e){ notify(e.message||"Could not submit claim","error") }
+}
+
+/* ---------- ADVERTISER ---------- */
 function onCategoryChange(){
   var c=document.getElementById("ct-category").value;
   var cat=CATEGORIES[c];
@@ -547,13 +683,54 @@ function brandSvg(size){
     '<path d="M22 10 A 8 8 0 1 0 24 16" fill="none" stroke="url(#lg)" stroke-width="3" stroke-linecap="round"/>'+
     '<path d="M24 16 l-3 -3 l0 6 z" fill="#f59e0b"/></svg>';
 }
+
 function renderTopBar(){
   var home=state.user?"dashboard":"landing";
+  var unread = state.user ? state.notifications.filter(function(n){return !n.read}).length : 0;
+  var badge = unread > 0 ? '<span class="bell-badge">'+(unread>99?"99+":unread)+'</span>' : "";
+  var notifPanel = state.notifPanelOpen ? renderNotifPanel() : "";
   return '<div class="topbar">'+
     '<div class="brand" onclick="go(\''+home+'\')">'+brandSvg(34)+
       '<div><div class="brand-name">TaskLoop</div><div class="brand-tag">earn · complete · repeat</div></div>'+
     '</div>'+
-    '<div class="hamburger"><button class="hb" onclick="toggleDrawer()" aria-label="Menu"><span></span><span></span><span></span></button></div>'+
+    '<div class="topbar-right" style="position:relative;">'+
+      (state.user ? '<button class="bell" onclick="toggleNotifPanel()" aria-label="Notifications"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 8a6 6 0 1 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.9 1.9 0 0 0 3.4 0"/></svg>'+badge+'</button>' : "")+
+      '<div class="hamburger"><button class="hb" onclick="toggleDrawer()" aria-label="Menu"><span></span><span></span><span></span></button></div>'+
+      notifPanel+
+    '</div>'+
+  '</div>';
+}
+
+function notifKindColor(k){
+  var m={info:"#0f172a", success:"#16a34a", warning:"#d97706", money:"#0d9488", broadcast:"#7c3aed"};
+  return m[k]||"#334155";
+}
+function timeAgo(ts){
+  var s=Math.floor((Date.now()-Number(ts))/1000);
+  if(s<60) return s+"s ago";
+  if(s<3600) return Math.floor(s/60)+"m ago";
+  if(s<86400) return Math.floor(s/3600)+"h ago";
+  return Math.floor(s/86400)+"d ago";
+}
+function renderNotifPanel(){
+  var list = state.notifications.slice(0, 30);
+  var html = list.length===0
+    ? '<div class="notif-empty">No notifications yet.</div>'
+    : list.map(function(n){
+        var k=n.kind||"info";
+        var color=notifKindColor(k);
+        return '<div class="notif-item'+(n.read?"":" unread")+'" onclick="markNotifRead(\''+n.id+'\')">'+
+          '<div class="t"><span class="kind" style="background:'+color+';">'+esc(k)+'</span>'+esc(n.title)+'</div>'+
+          (n.body?'<div class="b">'+esc(n.body)+'</div>':"")+
+          '<div class="m">'+timeAgo(n.ts)+'</div>'+
+        '</div>';
+      }).join("");
+  return '<div class="notif-panel" onclick="event.stopPropagation()">'+
+    '<div class="notif-head">'+
+      '<h3>Notifications</h3>'+
+      '<button onclick="markAllNotifsRead()">Mark all read</button>'+
+    '</div>'+
+    '<div class="notif-list">'+html+'</div>'+
   '</div>';
 }
 
@@ -576,8 +753,7 @@ function startHeroTyper(){
     if(typerState.dir===1){
       typerState.charIdx++;
       if(typerState.charIdx>=phrase.length){
-        el.textContent=phrase;
-        typerState.dir=0;
+        el.textContent=phrase; typerState.dir=0;
         typerState.timer=setTimeout(function(){ typerState.dir=-1; tick() },1600);
         return;
       }
@@ -746,6 +922,37 @@ function renderWallet(){
   var filters=["all","task","affiliate","funding","task_funding","refund","withdrawal","tier","adjustment"];
   var filterOpts=filters.map(function(f){return '<option value="'+f+'"'+(filter===f?" selected":"")+'>'+ledgerLabel(f)+'</option>'}).join("");
 
+  // Withdrawal availability
+  var wtype="task";
+  var minTask = Number((state.settings&&state.settings.withdraw_min_task)||10000);
+  var minAff  = Number((state.settings&&state.settings.withdraw_min_affiliate)||1000);
+  var feePct  = Number((state.settings&&state.settings.withdraw_fee_pct)||0.2);
+  var canTask = isWithdrawDayToday("task", state.settings);
+  var canAff  = isWithdrawDayToday("affiliate", state.settings);
+  var nextTask = nextWithdrawDate("task", state.settings);
+  var nextAff  = nextWithdrawDate("affiliate", state.settings);
+
+  var approvedPayout = state.payoutMethods.filter(function(m){return m.status==="approved"})[0];
+
+  var withdrawBlock = "";
+  if(!approvedPayout){
+    withdrawBlock = '<div class="banner" style="background:#fef3c7;color:#92400e;">You need an approved payout method before you can withdraw. <a href="#" onclick="go(\'payout\');return false;" style="color:#0f766e;font-weight:700;">Add one →</a></div>';
+  } else {
+    withdrawBlock =
+      '<select id="wd-type" onchange="render()">'+
+        '<option value="task">Task earnings — min '+fmtN(minTask)+' — next '+nextTask+'</option>'+
+        '<option value="affiliate">Affiliate earnings — min '+fmtN(minAff)+' — next '+nextAff+'</option>'+
+      '</select>'+
+      '<input id="wd-amount" type="number" placeholder="Amount" />'+
+      '<p class="muted" style="font-size:12px;">Fee: '+(feePct*100).toFixed(0)+'% of the amount. Processed to your approved bank: '+esc(approvedPayout.bank_name)+' ••••'+esc(approvedPayout.account_number.slice(-4))+'</p>';
+    if(!canTask && !canAff){
+      withdrawBlock += '<button class="btn btn-amber btn-full" disabled>Withdrawals closed today</button>'+
+        '<p class="muted" style="font-size:12px;">Task earnings: next '+nextTask+' &middot; Affiliate: next '+nextAff+'</p>';
+    } else {
+      withdrawBlock += '<button class="btn btn-amber btn-full" onclick="requestWithdrawal()">Request withdrawal</button>';
+    }
+  }
+
   return '<div class="stats-row">'+
       '<div class="stat"><div class="stat-label">Task balance</div><div class="stat-value">'+fmtN(user.task_balance)+'</div></div>'+
       '<div class="stat"><div class="stat-label">Advertiser balance</div><div class="stat-value">'+fmtN(user.advertiser_balance)+'</div></div>'+
@@ -753,17 +960,101 @@ function renderWallet(){
     '</div>'+
     '<div style="display:flex;gap:8px;margin-top:14px;flex-wrap:wrap;">'+
       '<button class="btn btn-primary" onclick="go(\'fundWallet\')">Fund wallet</button>'+
+      '<button class="btn btn-ghost" onclick="go(\'payout\')">Payout method</button>'+
     '</div>'+
     '<div class="card wide" style="margin-top:20px;">'+
       '<h3>Withdraw earnings</h3>'+
-      '<p class="muted" style="font-size:13px;">20% fee on every withdrawal. Task earnings: 15th monthly. Affiliate: Mon/Wed/Fri.</p>'+
-      '<select id="wd-type"><option value="task">Task earnings — min '+fmtN(WITHDRAW_MIN.task)+'</option><option value="affiliate">Affiliate earnings — min '+fmtN(WITHDRAW_MIN.affiliate)+'</option></select>'+
-      '<input id="wd-amount" type="number" placeholder="Amount" />'+
-      '<button class="btn btn-amber btn-full" onclick="requestWithdrawal()">Request withdrawal</button>'+
+      '<p class="muted" style="font-size:13px;">'+(feePct*100).toFixed(0)+'% fee. Task earnings: '+(state.settings&&state.settings.withdraw_task_days&&state.settings.withdraw_task_days.join(", ")||"as configured")+'. Affiliate: '+(state.settings&&state.settings.withdraw_affiliate_days&&state.settings.withdraw_affiliate_days.join(", ")||"Mon/Wed/Fri")+'.</p>'+
+      withdrawBlock+
     '</div>'+
     '<h3 style="margin-top:24px;">Transaction history</h3>'+
     '<select id="lf" onchange="state.ledgerFilter=this.value;render()">'+filterOpts+'</select>'+
     ledgerHtml;
+}
+
+function renderPayout(){
+  var user=state.user;
+  var mine = state.payoutMethods;
+  var approved = mine.filter(function(m){return m.status==="approved"})[0];
+  var pending = mine.filter(function(m){return m.status==="pending"})[0];
+  var html="";
+  if(state.payoutStage==="form"){
+    html = '<input id="pm-bank" placeholder="Bank name (e.g. GTBank)" />'+
+      '<input id="pm-acct" placeholder="Account number (10 digits)" />'+
+      '<input id="pm-name" placeholder="Account name (as on bank account)" />'+
+      '<button class="btn btn-primary btn-full" onclick="submitPayoutMethod()">Submit for approval</button>'+
+      '<button class="btn btn-ghost btn-full" onclick="cancelPayoutForm()">Cancel</button>';
+  } else {
+    if(approved){
+      html += '<div class="row" style="flex-direction:column;align-items:stretch;">'+
+        '<div style="display:flex;justify-content:space-between;align-items:center;"><strong>Current payout method</strong><span class="pill" style="background:#16a34a;">approved</span></div>'+
+        '<div class="muted" style="font-size:14px;margin-top:6px;">'+esc(approved.bank_name)+' — ••••'+esc(approved.account_number.slice(-4))+'</div>'+
+        '<div class="muted" style="font-size:12px;">Account name: '+esc(approved.account_name)+'</div>'+
+      '</div>'+
+      '<button class="btn btn-ghost btn-full" onclick="openPayoutForm()">Request change</button>'+
+      '<p class="muted" style="font-size:12px;">To change your bank account, submit a new one. It will replace the current one once admin approves. Contact support if you need help.</p>';
+    } else if(pending){
+      html += '<div class="banner" style="background:#fef3c7;color:#92400e;">You have a payout method pending admin approval.</div>'+
+        '<div class="row" style="flex-direction:column;align-items:stretch;">'+
+          '<strong>'+esc(pending.bank_name)+' — ••••'+esc(pending.account_number.slice(-4))+'</strong>'+
+          '<div class="muted" style="font-size:12px;">Submitted '+new Date(Number(pending.ts)).toLocaleString()+'</div>'+
+        '</div>'+
+        '<button class="btn btn-ghost btn-full" onclick="openPayoutForm()">Submit a different one</button>';
+    } else {
+      html += '<p class="muted">You have not added a payout method yet.</p>'+
+        '<button class="btn btn-primary btn-full" onclick="openPayoutForm()">Add payout method</button>';
+    }
+    // History
+    var history = mine.filter(function(m){return m.status!=="approved"}).slice(0,5);
+    if(history.length){
+      html += '<h3 style="margin-top:22px;">History</h3>';
+      html += history.map(function(m){
+        var c = m.status==="pending" ? "#d97706" : m.status==="rejected" ? "#dc2626" : "#16a34a";
+        return '<div class="row"><div>'+
+          '<strong>'+esc(m.bank_name)+' ••••'+esc(m.account_number.slice(-4))+'</strong>'+
+          '<div class="muted" style="font-size:12px;">'+new Date(Number(m.ts)).toLocaleString()+'</div>'+
+          (m.admin_note?'<div style="font-size:12px;color:#dc2626;">'+esc(m.admin_note)+'</div>':"")+
+        '</div><span class="pill" style="background:'+c+';">'+m.status+'</span></div>';
+      }).join("");
+    }
+  }
+  return '<div class="card">'+
+    '<h2>Payout method</h2>'+
+    '<p class="muted" style="font-size:13px;">Where your withdrawal money will be sent. Must be approved by admin before you can withdraw.</p>'+
+    html+
+  '</div>';
+}
+
+function renderSupport(){
+  var s = state.support || {};
+  function card(type, label, value, sub){
+    if(!value) return "";
+    var cls = type==="wa" ? " wa" : type==="tg" ? " tg" : "";
+    var href = value;
+    if(type==="wa" && /^\+?\d/.test(value)) href = "https://wa.me/"+value.replace(/\D/g,"");
+    if(type==="tg" && !/^https?:/.test(value)) href = "https://t.me/"+value.replace(/^@/,"");
+    if(type==="email" && !/^mailto:/.test(value)) href = "mailto:"+value;
+    if(/^https?:/.test(value)) href = value;
+    return '<a class="support-card'+cls+'" href="'+esc(href)+'" target="_blank" rel="noopener">'+
+      '<div class="label">'+esc(label)+'</div>'+
+      '<div class="val">'+esc(value)+'</div>'+
+      (sub?'<div class="sub">'+esc(sub)+'</div>':"")+
+    '</a>';
+  }
+  var html =
+    card("wa","WhatsApp number", s.whatsapp_number, "Chat with support")+
+    card("tg","Telegram username", s.telegram_username, "Message us")+
+    card("email","Support email", s.support_email, "Email us")+
+    card("wa","WhatsApp group", s.whatsapp_group_link, "Join community")+
+    card("tg","Telegram group", s.telegram_group_link, "Join community")+
+    card("wa","WhatsApp channel", s.whatsapp_channel_link, "Follow for updates")+
+    card("tg","Telegram channel", s.telegram_channel_link, "Follow for updates");
+  if(!html) html = '<p class="muted">Support contacts have not been set up yet. Check back soon.</p>';
+  return '<div class="card wide">'+
+    '<h2>Support & community</h2>'+
+    '<p class="muted" style="font-size:14px;">Reach us on your preferred channel. Admin updates these links so you always get the latest.</p>'+
+    '<div class="support-grid">'+html+'</div>'+
+  '</div>';
 }
 
 function renderFundWallet(){
@@ -788,7 +1079,7 @@ function renderFundWallet(){
       '<div>Bank: <strong>'+BANK.bank+'</strong></div>'+
       '<div style="margin-top:8px;">Amount to send: <strong>'+fmtN(amount)+'</strong></div>'+
       '</div>'+
-      '<p class="muted" style="font-size:13px;">Pay externally, then confirm below. Admin cross-checks the bank statement and credits your wallet.</p>'+
+      '<p class="muted" style="font-size:13px;">Pay externally, then confirm below.</p>'+
       '<button class="btn btn-primary btn-full" onclick="goToWalletForm()">I\'ve paid — confirm</button>';
   } else if(stage==="form"){
     html='<p style="font-size:14px;">Confirming funding of <strong>'+fmtN(amount)+'</strong></p>'+
@@ -819,7 +1110,7 @@ function renderUpgrade(){
       '<div>Bank: <strong>'+BANK.bank+'</strong></div>'+
       '<div style="margin-top:8px;">Amount: <strong>'+fmtN(tier.fee)+'</strong></div>'+
       '</div>'+
-      '<p class="muted" style="font-size:13px;">Pay externally, then confirm below. Admin cross-checks the bank statement.</p>'+
+      '<p class="muted" style="font-size:13px;">Pay externally, then confirm below.</p>'+
       '<button class="btn btn-primary btn-full" onclick="goToDepositForm()">I\'ve paid — confirm</button>';
   } else if(state.upgradeStage==="form"){
     html='<input id="dep-name" placeholder="Full name on transfer" />'+
@@ -882,13 +1173,21 @@ function renderMyTasks(){
 
 function renderSettings(){
   var user=state.user;
+  var notifPerm = ("Notification" in window) ? Notification.permission : "unavailable";
+  var permBtn = notifPerm==="default" ? '<button class="btn btn-ghost" onclick="Notification.requestPermission().then(render)">Enable browser notifications</button>' :
+                notifPerm==="granted" ? '<span class="pill" style="background:#16a34a;">enabled</span>' :
+                notifPerm==="denied" ? '<span class="pill" style="background:#dc2626;">blocked in browser</span>' :
+                '<span class="muted">not supported</span>';
   return '<div class="card">'+
     '<h2>Account settings</h2>'+
     '<label class="lbl">Name</label><input value="'+esc(user.name)+'" disabled />'+
     '<label class="lbl">Email</label><input value="'+esc(user.email)+'" disabled />'+
     '<label class="lbl">Referral code</label><input value="'+esc(user.ref_code)+'" disabled />'+
     '<p class="muted" style="font-size:12px;">To change your name or email, contact support.</p>'+
-    '<button class="btn btn-danger" onclick="logout()">Log out</button>'+
+    '<h3 style="margin-top:22px;">Browser notifications</h3>'+
+    '<p class="muted" style="font-size:13px;">Get a native popup when something happens while the site is open in a background tab. Requires browser permission.</p>'+
+    '<div style="margin-top:8px;">'+permBtn+'</div>'+
+    '<button class="btn btn-danger btn-full" onclick="logout()" style="margin-top:22px;">Log out</button>'+
   '</div>';
 }
 
@@ -903,7 +1202,9 @@ function render(){
   else if(r==="task") body=renderTaskDetail();
   else if(r==="submissions") body=renderSubmissions();
   else if(r==="wallet") body=renderWallet();
+  else if(r==="payout") body=renderPayout();
   else if(r==="fundWallet") body=renderFundWallet();
+  else if(r==="support") body=renderSupport();
   else if(r==="upgrade") body=renderUpgrade();
   else if(r==="createTask") body=renderCreateTask();
   else if(r==="myTasks") body=renderMyTasks();
@@ -935,10 +1236,43 @@ function startTaskTimer(){
   },200);
 }
 
+/* Background poll for notifications */
+var notifPollInterval=null;
+function startNotifPolling(){
+  clearInterval(notifPollInterval);
+  notifPollInterval = setInterval(async function(){
+    if(!state.user) return;
+    await loadNotifications();
+    // Update just the bell badge without full re-render
+    var badge = document.querySelector(".bell-badge");
+    var unread = state.notifications.filter(function(n){return !n.read}).length;
+    var bell = document.querySelector(".bell");
+    if(bell){
+      if(unread>0){
+        if(badge) badge.textContent = unread>99?"99+":unread;
+        else{
+          var b = document.createElement("span");
+          b.className="bell-badge"; b.textContent = unread>99?"99+":unread;
+          bell.appendChild(b);
+        }
+      } else if(badge){ badge.remove(); }
+    }
+  }, 30000);
+}
+
+/* Close notification panel when clicking elsewhere */
+document.addEventListener("click", function(e){
+  if(state.notifPanelOpen && !e.target.closest(".notif-panel") && !e.target.closest(".bell")){
+    state.notifPanelOpen=false; render();
+  }
+});
+
 (async function boot(){
   await refreshAll();
   if(state.user){
     state.route="dashboard";
+    startNotifPolling();
+    maybeAskNotifPermission();
   } else {
     state.route="landing";
   }

@@ -95,6 +95,7 @@
   .btn-primary:hover:not(:disabled){filter:brightness(1.05)}
   .btn-amber{background:linear-gradient(180deg,var(--amber-400),var(--amber-600));color:#fff;box-shadow:0 8px 20px rgba(217,119,6,.3)}
   .btn-danger{background:var(--danger-bg);color:#b91c1c}
+  .btn-ghost{background:transparent;color:var(--teal-700);border:1px solid var(--teal-500)}
   .btn-full{width:100%;margin-top:16px}
   .pill{display:inline-block;padding:4px 11px;border-radius:999px;color:#fff;font-size:12px;font-weight:700;letter-spacing:.02em}
   .steps{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:18px;margin-top:26px}
@@ -129,6 +130,11 @@
   a{color:var(--teal-600)}
   .spinner{display:inline-block;width:14px;height:14px;border:2px solid rgba(255,255,255,.4);border-top-color:#fff;border-radius:50%;animation:spin .6s linear infinite;vertical-align:-2px;margin-right:6px}
   @keyframes spin{to{transform:rotate(360deg)}}
+  .amount-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:10px;margin:10px 0}
+  .amount-btn{padding:14px 10px;border-radius:var(--radius-sm);border:2px solid var(--slate-200);background:#fff;cursor:pointer;
+    font-weight:700;font-size:15px;transition:all .12s ease}
+  .amount-btn:hover{border-color:var(--teal-400);box-shadow:var(--shadow-sm)}
+  .amount-btn.selected{border-color:var(--teal-600);background:linear-gradient(180deg,var(--teal-50),#fff);color:var(--teal-700)}
 </style>
 </head>
 <body>
@@ -139,7 +145,7 @@
   <div class="drawer-head">
     <svg width="34" height="34" viewBox="0 0 32 32" aria-hidden="true">
       <defs><linearGradient id="dgl" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#14b8a6"/><stop offset="1" stop-color="#0f766e"/></linearGradient></defs>
-      <circle cx="16" cy="16" r="13" fill="none" stroke="url(#dgl)" stroke-width="3"/>
+      <circle cx="16" cy="16" r="14" fill="none" stroke="url(#dgl)" stroke-width="3"/>
       <path d="M22 10 A 8 8 0 1 0 24 16" fill="none" stroke="url(#dgl)" stroke-width="3" stroke-linecap="round"/>
       <path d="M24 16 l-3 -3 l0 6 z" fill="#f59e0b"/>
     </svg>
@@ -159,17 +165,12 @@
 /* ============================================================
    TaskLoop — main app (worker + advertiser)
    Backend: Supabase (Postgres + RLS + SQL functions)
-   Every write goes through an SQL function. Client never writes
-   to tables directly. See /supabase/migrations for schema.
    ============================================================ */
 
-/* ---------------- CONFIG ---------------- */
 var SUPABASE_URL = "https://jcajknuldlkuwtxhymbt.supabase.co";
 var SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImpjYWprbnVsZGxrdXd0eGh5bWJ0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODk1NjE1MjIsImV4cCI6MjEwNTEzNzUyMn0.erATFYwKkdq6crbHqu1KG3OknUCEDcN6CvvkGDHZRn8";
-
 var sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
-/* ---------------- CONSTANTS ---------------- */
 var TIERS = [
   { id:"free",name:"Free",fee:0 },{ id:"starter",name:"Starter",fee:1000 },
   { id:"growth",name:"Growth",fee:3250 },{ id:"professional",name:"Professional",fee:5500 },
@@ -189,40 +190,43 @@ var WITHDRAW_FEE = 0.2;
 var WITHDRAW_MIN = { task:10000, affiliate:1000 };
 var WITHDRAW_DAYS = { task:[15], affiliate:[1,3,5] };
 var BANK = { number:"5012652807", name:"PEER PULSE TECHNOLOGY", bank:"Safe Haven MFB" };
-var ADMIN_EMAIL = "lifedreamguarantor@gmail.com";
+var WALLET_PRESETS = [5000, 10000, 25000, 50000, 100000];
 
-/* ---------------- HELPERS ---------------- */
 function uid(){return Math.random().toString(36).slice(2)+Date.now().toString(36)}
-function isBlockedDay(){var d=new Date().getDay();return d===5||d===6}
 function fmtN(n){return "\u20A6"+Number(n||0).toLocaleString("en-NG")}
 function tierById(id){for(var i=0;i<TIERS.length;i++)if(TIERS[i].id===id)return TIERS[i];return TIERS[0]}
 function nextWithdrawDate(type){var t=new Date();for(var i=0;i<40;i++){var d=new Date(t);d.setDate(t.getDate()+i);if(type==="task"){if(d.getDate()===15)return d.toDateString()}else{if(WITHDRAW_DAYS.affiliate.indexOf(d.getDay())!==-1)return d.toDateString()}}return "—"}
 function esc(s){var d=document.createElement("div");d.innerText=s==null?"":s;return d.innerHTML}
 function qs(k){return new URLSearchParams(window.location.search).get(k)}
+function isBlockedDay(settings){
+  if(!settings) return false;
+  var d=new Date();
+  var dow=d.getDay();
+  if(settings.blocked_days && settings.blocked_days.indexOf(dow)!==-1) return true;
+  var today=d.toISOString().slice(0,10);
+  if(settings.blocked_dates && settings.blocked_dates.indexOf(today)!==-1) return true;
+  return false;
+}
 
-/* ---------------- LOCAL SESSION (client-only) ---------------- */
 var SESSION_KEY = "taskloop_session";
-function getSession(){
-  try{ return JSON.parse(localStorage.getItem(SESSION_KEY)||"null") }catch(e){ return null }
-}
-function setSession(s){
-  if(s) localStorage.setItem(SESSION_KEY, JSON.stringify(s));
-  else localStorage.removeItem(SESSION_KEY);
-}
+function getSession(){ try{ return JSON.parse(localStorage.getItem(SESSION_KEY)||"null") }catch(e){ return null } }
+function setSession(s){ if(s) localStorage.setItem(SESSION_KEY, JSON.stringify(s)); else localStorage.removeItem(SESSION_KEY); }
 
-/* ---------------- STATE ---------------- */
 var state = {
-  user: null,           // current user row from DB
+  user: null,
   tasks: [],
   submissions: [],
   ledger: [],
+  settings: null,
   route: "loading",
   activeStart: null,
   upgradeStage: "select",
-  upgradeTierId: "starter"
+  upgradeTierId: "starter",
+  walletStage: "select",
+  walletAmount: 10000,
+  ledgerFilter: "all"
 };
 
-/* ---------------- TOAST ---------------- */
 var toastTimer=null;
 function notify(msg,kind){
   var el=document.getElementById("toast"); if(!el) return;
@@ -230,10 +234,9 @@ function notify(msg,kind){
   el.style.display="block";
   el.style.background=kind==="error"?"#dc2626":kind==="success"?"#16a34a":"#0f172a";
   clearTimeout(toastTimer);
-  toastTimer=setTimeout(function(){el.style.display="none"},3500);
+  toastTimer=setTimeout(function(){el.style.display="none"},4000);
 }
 
-/* ---------------- DRAWER ---------------- */
 function openDrawer(){document.getElementById("drawer").classList.add("open");document.getElementById("drawer-scrim").classList.add("open");document.body.style.overflow="hidden"}
 function closeDrawer(){document.getElementById("drawer").classList.remove("open");document.getElementById("drawer-scrim").classList.remove("open");document.body.style.overflow=""}
 function toggleDrawer(){document.getElementById("drawer").classList.contains("open")?closeDrawer():openDrawer()}
@@ -244,6 +247,7 @@ function iconFor(name){
     dashboard:'<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="3" y="3" width="7" height="9"/><rect x="14" y="3" width="7" height="5"/><rect x="14" y="12" width="7" height="9"/><rect x="3" y="16" width="7" height="5"/></svg>',
     submissions:'<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M9 12l2 2 4-4"/><rect x="3" y="4" width="18" height="16" rx="2"/></svg>',
     wallet:'<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="2" y="6" width="20" height="14" rx="2"/><path d="M2 10h20"/></svg>',
+    fund:'<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v10M9 10h6M9 14h6"/></svg>',
     upgrade:'<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 2l3 7 7 .5-5.5 4.5L18 21l-6-3.5L6 21l1.5-7L2 9.5 9 9z"/></svg>',
     createTask:'<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>',
     myTasks:'<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 5h18M3 12h18M3 19h12"/></svg>',
@@ -266,11 +270,13 @@ function renderDrawer(){
     items.push(item("dashboard","Dashboard","dashboard"));
     items.push(item("submissions","My submissions","submissions"));
     items.push(item("wallet","Wallet","wallet"));
-    items.push(item("upgrade","Upgrade","upgrade"));
+    items.push(item("fund","Fund wallet","fundWallet"));
+    items.push(item("upgrade","Upgrade tier","upgrade"));
+    items.push('<div class="drawer-sep"></div>');
     items.push(item("createTask","Post a task","createTask"));
     items.push(item("myTasks","My tasks","myTasks"));
-    items.push(item("settings","Settings","settings"));
     items.push('<div class="drawer-sep"></div>');
+    items.push(item("settings","Settings","settings"));
     items.push('<button class="drawer-item" onclick="copyRef()"><span class="ico">'+iconFor("wallet")+'</span><span>Copy referral code</span></button>');
     items.push('<div class="drawer-sep"></div>');
     items.push('<button class="drawer-item logout" onclick="logout()"><span class="ico">'+iconFor("logout")+'</span><span>Log out</span></button>');
@@ -283,7 +289,6 @@ function copyRef(){
   closeDrawer();
 }
 
-/* ---------------- ROUTING ---------------- */
 function go(r){ state.route=r; render() }
 function logout(){
   setSession(null);
@@ -292,7 +297,6 @@ function logout(){
   go("landing");
 }
 
-/* ---------------- AUTH via SQL functions ---------------- */
 async function doSignup(){
   var name=document.getElementById("su-name").value.trim();
   var email=document.getElementById("su-email").value.trim();
@@ -312,7 +316,7 @@ async function doSignup(){
     if(error) throw new Error(error.message||"Signup failed");
     var userId = data.userId;
     setSession({userId:userId});
-    await loadUser();
+    await refreshAll();
     notify("Welcome to TaskLoop","success");
     go("dashboard");
   }catch(e){
@@ -334,16 +338,15 @@ async function doLogin(){
     if(error) throw new Error(error.message||"Invalid credentials");
     var userId = data.userId;
     setSession({userId:userId});
-    await loadUser();
+    await refreshAll();
     notify("Welcome back","success");
-    go(data.isAdmin ? "dashboard" : "dashboard");
+    go("dashboard");
   }catch(e){
     notify(e.message||"Login failed","error");
     if(btn){btn.disabled=false;btn.textContent="Log in"}
   }
 }
 
-/* ---------------- DATA LOADING ---------------- */
 async function loadUser(){
   var s=getSession();
   if(!s||!s.userId){ state.user=null; return }
@@ -375,12 +378,17 @@ async function loadLedger(){
     state.ledger = data||[];
   }catch(e){ state.ledger=[] }
 }
+async function loadSettings(){
+  try{
+    var {data} = await sb.from("platform_settings").select("*").eq("id","main").single();
+    state.settings = data||null;
+  }catch(e){ state.settings=null }
+}
 async function refreshAll(){
   await loadUser();
-  await Promise.all([loadTasks(),loadSubmissions(),loadLedger()]);
+  await Promise.all([loadTasks(),loadSubmissions(),loadLedger(),loadSettings()]);
 }
 
-/* ---------------- TASK ACTIONS ---------------- */
 var activeStartTimer=null;
 async function startTask(taskId){
   try{
@@ -408,7 +416,6 @@ async function submitTask(){
   if(btn){btn.disabled=true;btn.innerHTML='<span class="spinner"></span>Submitting…'}
 
   try{
-    // Screenshot never uploaded — only its presence is noted.
     var key = pendingScreenshot ? ("local:"+uid()) : null;
     var {data,error} = await sb.rpc("fn_submit_task",{
       p_start_id:start.startId, p_worker_id:state.user.id, p_screenshot_key:key
@@ -425,7 +432,6 @@ async function submitTask(){
   }
 }
 
-/* ---------------- WALLET ---------------- */
 async function requestWithdrawal(){
   var type=document.getElementById("wd-type").value;
   var amount=Number(document.getElementById("wd-amount").value);
@@ -441,7 +447,6 @@ async function requestWithdrawal(){
   }catch(e){ notify(e.message||"Could not request","error") }
 }
 
-/* ---------------- UPGRADE ---------------- */
 function chooseUpgradeTier(id){ state.upgradeTierId=id; render() }
 function revealBank(){
   state.upgradeStage="loading"; render();
@@ -455,19 +460,35 @@ async function submitDepositClaim(){
   try{
     var {data,error} = await sb.rpc("fn_submit_deposit",{p_user_id:state.user.id,p_full_name:fullName,p_tier_id:tierId});
     if(error) throw new Error(error.message);
-    // Best-effort admin email — the deposit row is the source of truth.
-    fetch("https://formsubmit.co/ajax/"+ADMIN_EMAIL,{
-      method:"POST",
-      headers:{"Content-Type":"application/json",Accept:"application/json"},
-      body:JSON.stringify({_subject:"New TaskLoop tier payment claim",name:fullName,tier:tierId,amount:data.amount,userId:state.user.id})
-    }).catch(function(){});
     state.upgradeStage="select";
     notify("Claim submitted — admin will verify","success");
     go("dashboard");
   }catch(e){ notify(e.message||"Could not submit claim","error") }
 }
 
-/* ---------------- ADVERTISER ---------------- */
+/* ---------- WALLET FUNDING (new) ---------- */
+function chooseWalletAmount(a){ state.walletAmount=a; render() }
+function revealWalletBank(){
+  state.walletStage="loading"; render();
+  setTimeout(function(){ state.walletStage="bank"; render() },1600);
+}
+function goToWalletForm(){ state.walletStage="form"; render() }
+async function submitWalletFund(){
+  var fullName=document.getElementById("wf-name").value.trim();
+  var amount=state.walletAmount;
+  if(!fullName){notify("Enter your full name","error");return}
+  if(!amount||amount<1000){notify("Minimum funding is ₦1,000","error");return}
+  try{
+    var {data,error} = await sb.rpc("fn_request_wallet_fund",{
+      p_user_id:state.user.id, p_amount:amount, p_full_name:fullName
+    });
+    if(error) throw new Error(error.message);
+    state.walletStage="select";
+    notify("Funding request submitted — admin will verify","success");
+    go("wallet");
+  }catch(e){ notify(e.message||"Could not submit","error") }
+}
+
 function onCategoryChange(){
   var c=document.getElementById("ct-category").value;
   var cat=CATEGORIES[c];
@@ -479,10 +500,25 @@ function onCategoryChange(){
 function updateTaskTotals(){
   var q=Math.max(MIN_TASK_QTY,Number(document.getElementById("ct-quantity").value)||MIN_TASK_QTY);
   var r=Number(document.getElementById("ct-reward").value)||0;
-  var wt=r*q, com=wt*0.5;
+  var wt=r*q, com=wt*0.5, total=wt+com;
   document.getElementById("ct-worker-total").textContent=fmtN(wt);
   document.getElementById("ct-commission").textContent=fmtN(com);
-  document.getElementById("ct-grand-total").textContent=fmtN(wt+com);
+  document.getElementById("ct-grand-total").textContent=fmtN(total);
+  var bal=Number(state.user.advertiser_balance||0);
+  var fundBtn=document.getElementById("ct-fund-hint");
+  var submitBtn=document.getElementById("ct-submit-btn");
+  if(fundBtn && submitBtn){
+    if(bal<total){
+      submitBtn.disabled=true;
+      submitBtn.textContent="Insufficient balance — Fund wallet";
+      fundBtn.style.display="block";
+      fundBtn.textContent="You have "+fmtN(bal)+" — need "+fmtN(total)+". Click to fund.";
+    } else {
+      submitBtn.disabled=false;
+      submitBtn.textContent="Submit for admin approval";
+      fundBtn.style.display="none";
+    }
+  }
 }
 async function createTask(){
   var category=document.getElementById("ct-category").value;
@@ -498,12 +534,12 @@ async function createTask(){
       p_quantity:quantity, p_reward:reward, p_instructions:instructions, p_premium:premium
     });
     if(error) throw new Error(error.message);
-    notify("Task submitted for admin approval","success");
+    notify("Task submitted. "+fmtN(data.advertiserTotal)+" held in escrow.","success");
+    await loadUser();
     go("myTasks");
   }catch(e){ notify(e.message||"Could not create task","error") }
 }
 
-/* ---------------- RENDER ---------------- */
 function brandSvg(size){
   return '<svg width="'+size+'" height="'+size+'" viewBox="0 0 32 32" aria-hidden="true">'+
     '<defs><linearGradient id="lg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#14b8a6"/><stop offset="1" stop-color="#0f766e"/></linearGradient></defs>'+
@@ -521,7 +557,6 @@ function renderTopBar(){
   '</div>';
 }
 
-/* ---------- LANDING ---------- */
 var heroPhrases=[
   "Complete simple social tasks. Get paid per completion.",
   "No daily caps. Work at your own pace.",
@@ -576,9 +611,9 @@ function renderLanding(){
     '</div>'+
     '<div class="steps">'+stepsHtml+'</div>'+
     '<div style="background:linear-gradient(135deg, rgba(20,184,166,.10), rgba(251,191,36,.08)); border:1px solid rgba(20,184,166,.25); border-radius:16px; padding:22px; margin-top:28px; color:#0f766e;">'+
-      "<strong>Trust:</strong> Balances are server-controlled. Screenshots stay on your device — we never store them. Admin reviews every submission within 24 hours."+
+      "<strong>Trust:</strong> Balances are server-controlled. Advertiser funds are held in escrow until a worker completes. Admin reviews every submission within 24 hours."+
     '</div>'+
-    '<div class="footer">Looking for consistent earning?</div>';
+    '<div class="footer">Looking for the <a href="admin.html">admin portal</a>?</div>';
 }
 
 function renderSignup(){
@@ -610,9 +645,10 @@ function renderLogin(){
 }
 
 function renderDashboard(){
-  var user=state.user, tier=tierById(user.tier_id), blocked=isBlockedDay();
+  var user=state.user, tier=tierById(user.tier_id);
+  var blocked=isBlockedDay(state.settings);
   var liveTasks=state.tasks.filter(function(t){return t.status==="live" && t.completed<t.quantity});
-  var banner=blocked?'<div class="banner" style="background:#fef3c7;color:#92400e;">Tasks are paused platform-wide on Fridays and Saturdays. Come back Sunday.</div>':"";
+  var banner=blocked?'<div class="banner" style="background:#fef3c7;color:#92400e;">Tasks are paused today. Come back on an active day.</div>':"";
   var tasksHtml=liveTasks.length===0?'<p class="muted">No tasks live right now. Check back soon.</p>':
     '<div class="grid">'+liveTasks.map(function(t){
       var cat=CATEGORIES[t.category]||{color:"#0d9488"};
@@ -627,9 +663,13 @@ function renderDashboard(){
   return '<div style="padding-top:8px;">'+banner+
     '<div class="stats-row">'+
       '<div class="stat"><div class="stat-label">Task balance</div><div class="stat-value">'+fmtN(user.task_balance)+'</div></div>'+
+      '<div class="stat"><div class="stat-label">Advertiser balance</div><div class="stat-value">'+fmtN(user.advertiser_balance)+'</div></div>'+
       '<div class="stat"><div class="stat-label">Affiliate balance</div><div class="stat-value">'+fmtN(user.affiliate_balance)+'</div></div>'+
       '<div class="stat"><div class="stat-label">Tier</div><div class="stat-value">'+tier.name+'</div></div>'+
-      '<div class="stat"><div class="stat-label">Referral code</div><div class="stat-value" style="font-size:16px;">'+esc(user.ref_code)+'</div></div>'+
+    '</div>'+
+    '<div style="display:flex; gap:8px; margin-top:14px; flex-wrap:wrap;">'+
+      '<button class="btn btn-primary" onclick="go(\'fundWallet\')">Fund wallet</button>'+
+      '<button class="btn btn-ghost" onclick="go(\'createTask\')">Post a task</button>'+
     '</div>'+
     '<h2 style="margin-top:28px;">Available tasks</h2>'+tasksHtml+
   '</div>';
@@ -666,24 +706,99 @@ function renderSubmissions(){
   return '<h2>My submissions</h2>'+rows;
 }
 
+function ledgerKind(l){
+  if(!l.note) return "other";
+  var n=l.note.toLowerCase();
+  if(n.indexOf("wallet funding")!==-1) return "funding";
+  if(n.indexOf("task funding")!==-1) return "task_funding";
+  if(n.indexOf("task cancelled")!==-1) return "refund";
+  if(n.indexOf("withdrawal")!==-1) return "withdrawal";
+  if(n.indexOf("referral")!==-1) return "affiliate";
+  if(n.indexOf("tier")!==-1 || n.indexOf("membership")!==-1) return "tier";
+  if(n.indexOf("admin adjustment")!==-1) return "adjustment";
+  if(l.type==="task") return "task";
+  if(l.type==="affiliate") return "affiliate";
+  return "other";
+}
+function ledgerLabel(k){
+  var m={
+    all:"All transactions", task:"Task earnings", affiliate:"Referral earnings",
+    funding:"Wallet fundings", task_funding:"Task fundings", refund:"Refunds",
+    withdrawal:"Withdrawals", tier:"Tier upgrades", adjustment:"Admin adjustments", other:"Other"
+  };
+  return m[k]||k;
+}
+
 function renderWallet(){
   var user=state.user;
   var ledger=state.ledger;
-  var ledgerHtml=ledger.length===0?'<p class="muted">No transactions yet.</p>':ledger.map(function(l){
-    return '<div class="row"><div>'+esc(l.note)+' <span class="muted" style="font-size:12px;">&middot; '+new Date(Number(l.ts)).toLocaleString()+'</span></div><div style="color:'+(Number(l.amount)>=0?"#16a34a":"#dc2626")+';">'+(Number(l.amount)>=0?"+":"")+fmtN(l.amount)+'</div></div>';
+  var filter=state.ledgerFilter||"all";
+  var filtered = filter==="all" ? ledger : ledger.filter(function(l){return ledgerKind(l)===filter});
+  var ledgerHtml=filtered.length===0?'<p class="muted">No transactions in this category.</p>':filtered.map(function(l){
+    var k=ledgerKind(l);
+    var amt=Number(l.amount);
+    var color=amt>=0?"#16a34a":"#dc2626";
+    return '<div class="row"><div>'+
+      '<strong>'+esc(l.note)+'</strong>'+
+      '<div class="muted" style="font-size:12px;">'+new Date(Number(l.ts)).toLocaleString()+' &middot; '+ledgerLabel(k)+'</div>'+
+    '</div><div style="color:'+color+'; font-weight:700;">'+(amt>=0?"+":"")+fmtN(amt)+'</div></div>';
   }).join("");
+  var filters=["all","task","affiliate","funding","task_funding","refund","withdrawal","tier","adjustment"];
+  var filterOpts=filters.map(function(f){return '<option value="'+f+'"'+(filter===f?" selected":"")+'>'+ledgerLabel(f)+'</option>'}).join("");
+
   return '<div class="stats-row">'+
       '<div class="stat"><div class="stat-label">Task balance</div><div class="stat-value">'+fmtN(user.task_balance)+'</div></div>'+
+      '<div class="stat"><div class="stat-label">Advertiser balance</div><div class="stat-value">'+fmtN(user.advertiser_balance)+'</div></div>'+
       '<div class="stat"><div class="stat-label">Affiliate balance</div><div class="stat-value">'+fmtN(user.affiliate_balance)+'</div></div>'+
     '</div>'+
+    '<div style="display:flex;gap:8px;margin-top:14px;flex-wrap:wrap;">'+
+      '<button class="btn btn-primary" onclick="go(\'fundWallet\')">Fund wallet</button>'+
+    '</div>'+
     '<div class="card wide" style="margin-top:20px;">'+
-      '<h3>Withdraw</h3>'+
+      '<h3>Withdraw earnings</h3>'+
       '<p class="muted" style="font-size:13px;">20% fee on every withdrawal. Task earnings: 15th monthly. Affiliate: Mon/Wed/Fri.</p>'+
       '<select id="wd-type"><option value="task">Task earnings — min '+fmtN(WITHDRAW_MIN.task)+'</option><option value="affiliate">Affiliate earnings — min '+fmtN(WITHDRAW_MIN.affiliate)+'</option></select>'+
       '<input id="wd-amount" type="number" placeholder="Amount" />'+
       '<button class="btn btn-amber btn-full" onclick="requestWithdrawal()">Request withdrawal</button>'+
     '</div>'+
-    '<h3 style="margin-top:24px;">Transaction history</h3>'+ledgerHtml;
+    '<h3 style="margin-top:24px;">Transaction history</h3>'+
+    '<select id="lf" onchange="state.ledgerFilter=this.value;render()">'+filterOpts+'</select>'+
+    ledgerHtml;
+}
+
+function renderFundWallet(){
+  var stage=state.walletStage;
+  var amount=state.walletAmount;
+  var presets=WALLET_PRESETS.map(function(p){
+    return '<button class="amount-btn'+(amount===p?' selected':'')+'" onclick="chooseWalletAmount('+p+')">'+fmtN(p)+'</button>';
+  }).join("");
+  var html="";
+  if(stage==="select"){
+    html='<p class="muted" style="font-size:13px;">Choose an amount. Minimum ₦1,000.</p>'+
+      '<div class="amount-grid">'+presets+'</div>'+
+      '<label class="lbl">Or enter custom amount</label>'+
+      '<input type="number" min="1000" value="'+amount+'" oninput="state.walletAmount=Number(this.value)||0" />'+
+      '<button class="btn btn-primary btn-full" onclick="revealWalletBank()">Get bank details</button>';
+  } else if(stage==="loading"){
+    html='<p class="center" style="padding:30px;color:#0d9488;">Please hold on, generating your bank…</p>';
+  } else if(stage==="bank"){
+    html='<div style="background:linear-gradient(135deg, rgba(20,184,166,.10), rgba(251,191,36,.06)); border:1px solid rgba(20,184,166,.25); border-radius:12px; padding:18px; margin-top:12px;">'+
+      '<div>Account number: <strong>'+BANK.number+'</strong></div>'+
+      '<div>Account name: <strong>'+BANK.name+'</strong></div>'+
+      '<div>Bank: <strong>'+BANK.bank+'</strong></div>'+
+      '<div style="margin-top:8px;">Amount to send: <strong>'+fmtN(amount)+'</strong></div>'+
+      '</div>'+
+      '<p class="muted" style="font-size:13px;">Pay externally, then confirm below. Admin cross-checks the bank statement and credits your wallet.</p>'+
+      '<button class="btn btn-primary btn-full" onclick="goToWalletForm()">I\'ve paid — confirm</button>';
+  } else if(stage==="form"){
+    html='<p style="font-size:14px;">Confirming funding of <strong>'+fmtN(amount)+'</strong></p>'+
+      '<input id="wf-name" placeholder="Full name on transfer" />'+
+      '<button class="btn btn-primary btn-full" onclick="submitWalletFund()">Submit funding request</button>'+
+      '<button class="btn btn-ghost btn-full" onclick="state.walletStage=\'select\';render()">Back</button>';
+  }
+  return '<div class="card"><h2>Fund your wallet</h2>'+
+    '<p class="muted" style="font-size:14px;">Wallet funds are used to pay for tasks you post. Held in escrow until workers complete their tasks.</p>'+
+    html+'</div>';
 }
 
 function renderUpgrade(){
@@ -709,7 +824,6 @@ function renderUpgrade(){
   } else if(state.upgradeStage==="form"){
     html='<input id="dep-name" placeholder="Full name on transfer" />'+
       '<select id="dep-tier">'+options+'</select>'+
-      '<p class="muted" style="font-size:13px;">This also emails '+ADMIN_EMAIL+' via FormSubmit.</p>'+
       '<button class="btn btn-primary btn-full" onclick="submitDepositClaim()">Submit claim</button>';
   }
   return '<div class="card"><h2>Upgrade membership</h2>'+
@@ -722,6 +836,7 @@ function renderCreateTask(){
   var d=CATEGORIES.Like;
   return '<div class="card wide" style="max-width:720px;">'+
     '<h2>Post a task</h2>'+
+    '<p class="muted" style="font-size:13px;">You have <strong>'+fmtN(state.user.advertiser_balance)+'</strong> in your advertiser balance.</p>'+
     '<label class="lbl">Category</label>'+
     '<select id="ct-category" onchange="onCategoryChange()">'+catOptions+'</select>'+
     '<label class="lbl">Link / URL</label>'+
@@ -736,15 +851,15 @@ function renderCreateTask(){
     '<div style="background:rgba(241,245,249,.7); border:1px solid var(--slate-200); border-radius:12px; padding:14px;">'+
       '<div>Worker payout total: <strong id="ct-worker-total">'+fmtN(d.payout*MIN_TASK_QTY)+'</strong></div>'+
       '<div>Platform commission (50%): <strong id="ct-commission">'+fmtN(d.payout*MIN_TASK_QTY*0.5)+'</strong></div>'+
-      '<div style="border-top:1px solid var(--slate-200); margin-top:6px; padding-top:6px;">You fund: <strong id="ct-grand-total">'+fmtN(d.payout*MIN_TASK_QTY*1.5)+'</strong></div>'+
+      '<div style="border-top:1px solid var(--slate-200); margin-top:6px; padding-top:6px;">You fund (held in escrow): <strong id="ct-grand-total">'+fmtN(d.payout*MIN_TASK_QTY*1.5)+'</strong></div>'+
     '</div>'+
-    '<button class="btn btn-primary btn-full" onclick="createTask()">Submit for admin approval</button>'+
+    '<div id="ct-fund-hint" style="display:none; margin-top:12px; padding:12px; background:#fef3c7; color:#92400e; border-radius:10px; font-size:13px; cursor:pointer;" onclick="go(\'fundWallet\')"></div>'+
+    '<button id="ct-submit-btn" class="btn btn-primary btn-full" onclick="createTask()">Submit for admin approval</button>'+
   '</div>';
 }
 
 function renderMyTasks(){
   var mine=state.tasks.filter(function(t){return t.advertiser_id===state.user.id});
-  // Also include pending_approval tasks — reload just in case
   sb.from("tasks").select("*").eq("advertiser_id",state.user.id).order("created_at",{ascending:false}).then(function(res){
     if(res.data && res.data.length!==state.myTasksCount){
       state.myTasksCount=res.data.length;
@@ -754,11 +869,11 @@ function renderMyTasks(){
   });
   var list=state._myTasks||mine;
   var rows=list.length===0?'<p class="muted">You haven\'t posted any tasks yet.</p>':list.map(function(t){
-    var statusColor=t.status==="live"?"#16a34a":t.status==="completed"?"#0d9488":t.status==="paused"?"#94a3b8":"#d97706";
+    var statusColor=t.status==="live"?"#16a34a":t.status==="completed"?"#0d9488":t.status==="paused"?"#94a3b8":t.status==="cancelled"?"#dc2626":"#d97706";
     var pct=Math.min(100,(t.completed/t.quantity)*100);
     return '<div class="row" style="flex-direction:column;align-items:stretch;">'+
       '<div style="display:flex;justify-content:space-between;"><strong>'+t.category+' &middot; '+fmtN(t.reward)+'/task</strong><span class="pill" style="background:'+statusColor+';">'+t.status+'</span></div>'+
-      '<div class="muted" style="font-size:14px;margin-top:6px;">'+t.completed+'/'+t.quantity+' completed — '+fmtN(t.completed*t.reward*1.5)+' of '+fmtN(t.advertiser_total)+' spent</div>'+
+      '<div class="muted" style="font-size:14px;margin-top:6px;">'+t.completed+'/'+t.quantity+' completed &middot; '+fmtN(t.completed*t.reward*1.5)+' of '+fmtN(t.escrow_total||t.advertiser_total)+' spent &middot; '+fmtN(t.escrow_remaining||0)+' remaining in escrow</div>'+
       '<div class="progress-bg"><div class="progress-fg" style="width:'+pct+'%;"></div></div>'+
     '</div>';
   }).join("");
@@ -777,7 +892,6 @@ function renderSettings(){
   '</div>';
 }
 
-/* ---------------- MAIN RENDER ---------------- */
 function render(){
   var user=state.user, r=state.route, body="";
   if(r==="loading"){ document.getElementById("root").innerHTML='<div class="card center"><p class="muted">Loading…</p></div>'; return }
@@ -789,6 +903,7 @@ function render(){
   else if(r==="task") body=renderTaskDetail();
   else if(r==="submissions") body=renderSubmissions();
   else if(r==="wallet") body=renderWallet();
+  else if(r==="fundWallet") body=renderFundWallet();
   else if(r==="upgrade") body=renderUpgrade();
   else if(r==="createTask") body=renderCreateTask();
   else if(r==="myTasks") body=renderMyTasks();
@@ -799,6 +914,7 @@ function render(){
   renderDrawer();
   if(r==="task" && state.activeStart) startTaskTimer();
   if(r==="landing") startHeroTyper();
+  if(r==="createTask") updateTaskTotals();
 }
 
 function startTaskTimer(){
@@ -819,15 +935,12 @@ function startTaskTimer(){
   },200);
 }
 
-/* ---------------- BOOT ---------------- */
 (async function boot(){
-  await loadUser();
+  await refreshAll();
   if(state.user){
     state.route="dashboard";
-    await Promise.all([loadTasks(),loadSubmissions(),loadLedger()]);
   } else {
     state.route="landing";
-    await loadTasks();
   }
   render();
 })();

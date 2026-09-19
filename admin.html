@@ -111,14 +111,14 @@
   .muted{color:var(--muted)}.dim{color:var(--dim)}.center{text-align:center}
   a{color:#5eead4}
   .modal-scrim{position:fixed;inset:0;background:rgba(0,0,0,.65);display:flex;align-items:center;justify-content:center;z-index:200;padding:20px}
-  .modal{background:var(--bg-2);border:1px solid var(--line);border-radius:16px;max-width:640px;width:100%;max-height:90vh;overflow-y:auto;
+  .modal{background:var(--bg-2);border:1px solid var(--line);border-radius:16px;max-width:720px;width:100%;max-height:90vh;overflow-y:auto;
     box-shadow:var(--shadow-lg);animation:modalIn .18s ease}
   @keyframes modalIn{from{opacity:0;transform:scale(.97)}to{opacity:1;transform:scale(1)}}
   .modal-head{padding:18px 22px;border-bottom:1px solid var(--line);display:flex;justify-content:space-between;align-items:center}
   .modal-body{padding:22px}
   .modal-foot{padding:16px 22px;border-top:1px solid var(--line);display:flex;justify-content:flex-end;gap:8px}
   .modal-close{background:transparent;border:none;color:var(--muted);font-size:22px;cursor:pointer;line-height:1}
-  .kv{display:grid;grid-template-columns:140px 1fr;gap:10px 16px;margin-bottom:14px;font-size:14px}
+  .kv{display:grid;grid-template-columns:160px 1fr;gap:10px 16px;margin-bottom:14px;font-size:14px}
   .kv > div:nth-child(odd){color:var(--muted)}
   .tabs{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:18px}
   .tab{padding:9px 14px;border-radius:10px;border:1px solid var(--line);background:rgba(30,41,59,.6);color:#cbd5e1;
@@ -136,6 +136,14 @@
   .day-btn:hover{border-color:#14b8a6}
   .day-btn.blocked{background:linear-gradient(180deg,#dc2626,#991b1b);color:#fff;border-color:transparent}
   .day-btn.allowed{background:linear-gradient(180deg,#14b8a6,#0d9488);color:#fff;border-color:transparent}
+  .month-day{display:inline-block;min-width:34px;padding:6px 8px;margin:3px;border-radius:8px;border:2px solid var(--line);
+    background:rgba(15,23,42,.6);color:#cbd5e1;cursor:pointer;font-weight:600;font-size:12px;text-align:center}
+  .month-day:hover{border-color:#14b8a6}
+  .month-day.on{background:linear-gradient(180deg,#14b8a6,#0d9488);color:#fff;border-color:transparent}
+  .settings-section{padding:18px 0;border-bottom:1px solid var(--line)}
+  .settings-section:last-child{border-bottom:none}
+  .settings-section h3{margin:0 0 6px;font-size:15px}
+  .settings-section p.hint{margin:0 0 12px;font-size:12.5px;color:var(--muted)}
 </style>
 </head>
 <body>
@@ -164,7 +172,7 @@
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script>
 /* ============================================================
-   TaskLoop — admin portal
+   TaskLoop — admin portal (final)
    ============================================================ */
 
 var SUPABASE_URL = "https://jcajknuldlkuwtxhymbt.supabase.co";
@@ -191,11 +199,28 @@ function setSession(s){ if(s) localStorage.setItem(SESSION_KEY, JSON.stringify(s
 var state = {
   admin: null,
   users: [], tasks: [], submissions: [], withdrawals: [], deposits: [],
-  walletDeposits: [], ledger: [], auditLog: [], platformRevenue: [], settings: null,
+  walletDeposits: [], payoutMethods: [], ledger: [], auditLog: [],
+  platformRevenue: [], settings: null, support: null,
   tab: "overview",
   modal: null,
   search: "",
-  editBlockedDays: [], editBlockedDates: [], editExpiryDays: 30
+  // settings edit buffer
+  editBlockedDays: [],
+  editBlockedDates: [],
+  editExpiryDays: 30,
+  editWithdrawTaskDays: [],
+  editWithdrawAffiliateDays: [],
+  editWithdrawMinTask: 10000,
+  editWithdrawMinAffiliate: 1000,
+  editWithdrawFeePct: 20,
+  // support edit buffer
+  editSupport: {},
+  // broadcast
+  broadcastMode: "all",   // "all" | "one"
+  broadcastTargetEmail: "",
+  broadcastKind: "broadcast",
+  broadcastTitle: "",
+  broadcastBody: ""
 };
 
 var toastTimer=null;
@@ -221,6 +246,7 @@ function iconFor(name){
     finance:'<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="2" y="6" width="20" height="14" rx="2"/><path d="M2 10h20"/></svg>',
     fraud:'<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 2l9 4v6c0 5-3.5 9.5-9 10-5.5-.5-9-5-9-10V6z"/><path d="M12 8v4M12 16h.01"/></svg>',
     audit:'<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 4h16v16H4z"/><path d="M8 8h8M8 12h8M8 16h5"/></svg>',
+    broadcast:'<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 11l19-9-9 19-2-8-8-2z"/></svg>',
     settings:'<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.6 1.6 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.6 1.6 0 0 0-1.8-.3 1.6 1.6 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1A1.6 1.6 0 0 0 9 19.4a1.6 1.6 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.6 1.6 0 0 0 .3-1.8 1.6 1.6 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1A1.6 1.6 0 0 0 4.6 9a1.6 1.6 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.6 1.6 0 0 0 1.8.3H9a1.6 1.6 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1A1.6 1.6 0 0 0 15 4.6a1.6 1.6 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.6 1.6 0 0 0-.3 1.8V9a1.6 1.6 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.6 1.6 0 0 0-1.5 1z"/></svg>',
     logout:'<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="M16 17l5-5-5-5"/><path d="M21 12H9"/></svg>'
   };
@@ -236,6 +262,7 @@ function renderDrawer(){
     items.push(item("tasks","Tasks","tasks"));
     items.push(item("users","Users","users"));
     items.push(item("finance","Finance","finance"));
+    items.push(item("broadcast","Broadcast","broadcast"));
     items.push(item("fraud","Fraud & risk","fraud"));
     items.push(item("audit","Audit log","audit"));
     items.push(item("settings","Settings","settings"));
@@ -244,7 +271,12 @@ function renderDrawer(){
   }
   document.getElementById("drawer-body").innerHTML=items.join("");
 }
-function setTab(t){ closeDrawer(); state.tab=t; if(t==="settings") loadSettingsIntoEditor(); render() }
+function setTab(t){
+  closeDrawer();
+  state.tab=t;
+  if(t==="settings") loadSettingsIntoEditor();
+  render();
+}
 
 async function doLogin(){
   var email=document.getElementById("li-email").value.trim().toLowerCase();
@@ -266,36 +298,37 @@ async function doLogin(){
     if(btn){btn.disabled=false;btn.textContent="Sign in"}
   }
 }
-
 async function loadAdminProfile(){
   if(!state.admin) return;
   var {data} = await sb.from("users").select("*").eq("id",state.admin.id).single();
   if(data && data.is_admin){ state.admin = data; return }
   setSession(null); state.admin=null;
 }
-
 function logout(){
   setSession(null);
   state.admin=null;
   state.users=[];state.tasks=[];state.submissions=[];state.withdrawals=[];state.deposits=[];
-  state.walletDeposits=[];state.ledger=[];state.auditLog=[];state.platformRevenue=[];
+  state.walletDeposits=[];state.payoutMethods=[];state.ledger=[];state.auditLog=[];
+  state.platformRevenue=[];state.settings=null;state.support=null;
   closeDrawer();
   render();
 }
 
 async function refreshAll(){
   if(!state.admin) return;
-  var [u,t,s,w,d,wd,l,a,pr,st] = await Promise.all([
+  var [u,t,s,w,d,wd,pm,l,a,pr,st,sc] = await Promise.all([
     sb.from("users").select("*").order("created_at",{ascending:false}),
     sb.from("tasks").select("*").order("created_at",{ascending:false}),
     sb.from("submissions").select("*").order("submitted_at",{ascending:false}).limit(300),
     sb.from("withdrawals").select("*").order("ts",{ascending:false}),
     sb.from("deposits").select("*").order("ts",{ascending:false}),
     sb.from("wallet_deposits").select("*").order("ts",{ascending:false}),
+    sb.from("payout_methods").select("*").order("ts",{ascending:false}),
     sb.from("ledger").select("*").order("ts",{ascending:false}).limit(300),
     sb.from("audit_log").select("*").order("ts",{ascending:false}).limit(200),
     sb.from("platform_revenue").select("*").order("ts",{ascending:false}).limit(500),
-    sb.from("platform_settings").select("*").eq("id","main").single()
+    sb.from("platform_settings").select("*").eq("id","main").single(),
+    sb.from("support_contacts").select("*").eq("id","main").single()
   ]);
   state.users = u.data||[];
   state.tasks = t.data||[];
@@ -303,10 +336,12 @@ async function refreshAll(){
   state.withdrawals = w.data||[];
   state.deposits = d.data||[];
   state.walletDeposits = wd.data||[];
+  state.payoutMethods = pm.data||[];
   state.ledger = l.data||[];
   state.auditLog = a.data||[];
   state.platformRevenue = pr.data||[];
   state.settings = st.data||null;
+  state.support = sc.data||null;
 }
 
 async function callAdmin(fnName, params, successMsg){
@@ -325,6 +360,7 @@ async function callAdmin(fnName, params, successMsg){
   }
 }
 
+/* ---------- Individual actions ---------- */
 function approveSubmission(id){ callAdmin("fn_admin_approve_submission",{p_submission_id:id},"Approved & credited") }
 function rejectSubmission(id){ callAdmin("fn_admin_reject_submission",{p_submission_id:id,p_reason:"Rejected by admin"},"Submission rejected") }
 function approveTask(id){ callAdmin("fn_admin_approve_task",{p_task_id:id},"Task is now live") }
@@ -335,14 +371,32 @@ function approveWithdrawal(id){ callAdmin("fn_admin_approve_withdrawal",{p_withd
 function rejectWithdrawal(id){ callAdmin("fn_admin_reject_withdrawal",{p_withdrawal_id:id},"Withdrawal rejected") }
 function approveWalletFund(id){ callAdmin("fn_admin_approve_wallet_fund",{p_deposit_id:id},"Wallet credited") }
 function rejectWalletFund(id){ callAdmin("fn_admin_reject_wallet_fund",{p_deposit_id:id,p_reason:"Rejected by admin"},"Wallet funding rejected") }
+function approvePayoutMethod(id){ callAdmin("fn_admin_approve_payout_method",{p_method_id:id},"Payout method approved") }
+function rejectPayoutMethod(id){
+  var r=prompt("Reason for rejecting this payout method:");
+  if(!r) return;
+  callAdmin("fn_admin_reject_payout_method",{p_method_id:id,p_reason:r},"Payout method rejected");
+}
+function editPayoutMethod(id){
+  var m=state.payoutMethods.filter(function(x){return x.id===id})[0];
+  if(!m) return;
+  var bank=prompt("Bank name:", m.bank_name);
+  if(bank===null) return;
+  var acct=prompt("Account number:", m.account_number);
+  if(acct===null) return;
+  var name=prompt("Account name:", m.account_name);
+  if(name===null) return;
+  callAdmin("fn_admin_edit_payout_method",{p_method_id:id,p_bank_name:bank,p_account_number:acct,p_account_name:name},"Payout method updated");
+}
 function runSweep(){ callAdmin("fn_admin_sweep_pending",{},"Sweep complete") }
 function cancelTask(id){
-  var reason=prompt("Reason for cancelling this task (shown in audit log):","Cancelled by admin");
+  var reason=prompt("Reason for cancelling this task:","Cancelled by admin");
   if(!reason) return;
   callAdmin("fn_admin_cancel_task",{p_task_id:id,p_reason:reason},"Task cancelled and escrow refunded");
 }
 
 function openEditUser(id){ state.modal={type:"user",id:id}; render() }
+function openUserDetail(id){ state.modal={type:"userDetail",id:id}; render() }
 function openEditTask(id){ state.modal={type:"task",id:id}; render() }
 function openAdjustBalance(id,field){ state.modal={type:"balance",id:id,field:field}; render() }
 function closeModal(){ state.modal=null; render() }
@@ -390,15 +444,40 @@ function adjustBalance(){
 
 /* ---------- SETTINGS EDITOR ---------- */
 function loadSettingsIntoEditor(){
-  if(!state.settings) return;
-  state.editBlockedDays = (state.settings.blocked_days||[]).slice();
-  state.editBlockedDates = (state.settings.blocked_dates||[]).slice();
-  state.editExpiryDays = state.settings.task_expiry_days||30;
+  if(state.settings){
+    state.editBlockedDays = (state.settings.blocked_days||[]).slice();
+    state.editBlockedDates = (state.settings.blocked_dates||[]).slice();
+    state.editExpiryDays = state.settings.task_expiry_days||30;
+    state.editWithdrawTaskDays = (state.settings.withdraw_task_days||[15]).slice();
+    state.editWithdrawAffiliateDays = (state.settings.withdraw_affiliate_days||[1,3,5]).slice();
+    state.editWithdrawMinTask = Number(state.settings.withdraw_min_task||10000);
+    state.editWithdrawMinAffiliate = Number(state.settings.withdraw_min_affiliate||1000);
+    state.editWithdrawFeePct = Math.round(Number(state.settings.withdraw_fee_pct||0.2)*100);
+  }
+  if(state.support){
+    state.editSupport = Object.assign({}, state.support);
+  }
 }
 function toggleDay(d){
   var i=state.editBlockedDays.indexOf(d);
-  if(i===-1) state.editBlockedDays.push(d);
-  else state.editBlockedDays.splice(i,1);
+  if(i===-1) state.editBlockedDays.push(d); else state.editBlockedDays.splice(i,1);
+  render();
+}
+function toggleWithdrawDow(type, d){
+  var arr = type==="task" ? state.editWithdrawTaskDays : state.editWithdrawAffiliateDays;
+  var i=arr.indexOf(d);
+  if(i===-1) arr.push(d); else arr.splice(i,1);
+  render();
+}
+function toggleWithdrawDom(type, d){
+  var arr = type==="task" ? state.editWithdrawTaskDays : state.editWithdrawAffiliateDays;
+  // Removing all <=6 entries when switching to dom mode is confusing, so we just toggle the number
+  var i=arr.indexOf(d);
+  if(i===-1) arr.push(d); else arr.splice(i,1);
+  render();
+}
+function clearWithdrawDays(type){
+  if(type==="task") state.editWithdrawTaskDays=[]; else state.editWithdrawAffiliateDays=[];
   render();
 }
 function addBlockedDate(){
@@ -414,10 +493,64 @@ function removeBlockedDate(d){
 }
 function saveSettings(){
   state.editExpiryDays = Number(document.getElementById("expiry-days").value)||30;
-  callAdmin("fn_admin_set_blocked_days",{
-    p_days:state.editBlockedDays,
-    p_dates:state.editBlockedDates
+  state.editWithdrawMinTask = Number(document.getElementById("wd-min-task").value)||10000;
+  state.editWithdrawMinAffiliate = Number(document.getElementById("wd-min-affiliate").value)||1000;
+  state.editWithdrawFeePct = Number(document.getElementById("wd-fee-pct").value)||20;
+  callAdmin("fn_admin_update_settings",{
+    p_blocked_days: state.editBlockedDays,
+    p_blocked_dates: state.editBlockedDates,
+    p_task_expiry_days: state.editExpiryDays,
+    p_withdraw_task_days: state.editWithdrawTaskDays,
+    p_withdraw_affiliate_days: state.editWithdrawAffiliateDays,
+    p_withdraw_min_task: state.editWithdrawMinTask,
+    p_withdraw_min_affiliate: state.editWithdrawMinAffiliate,
+    p_withdraw_fee_pct: state.editWithdrawFeePct/100
   },"Settings saved");
+}
+function saveSupport(){
+  var s=state.editSupport;
+  callAdmin("fn_admin_update_support",{
+    p_whatsapp_number: s.whatsapp_number||null,
+    p_telegram_username: s.telegram_username||null,
+    p_whatsapp_group_link: s.whatsapp_group_link||null,
+    p_telegram_group_link: s.telegram_group_link||null,
+    p_whatsapp_channel_link: s.whatsapp_channel_link||null,
+    p_telegram_channel_link: s.telegram_channel_link||null,
+    p_support_email: s.support_email||null
+  },"Support contacts saved");
+}
+function updateSupportField(k, v){
+  state.editSupport[k]=v;
+}
+
+/* ---------- BROADCAST ---------- */
+function setBroadcastMode(m){ state.broadcastMode=m; render() }
+async function sendBroadcast(){
+  var title=document.getElementById("bc-title").value.trim();
+  var body=document.getElementById("bc-body").value.trim();
+  var kind=document.getElementById("bc-kind").value;
+  if(!title){notify("Title required","error");return}
+  var targetIds=null;
+  if(state.broadcastMode==="one"){
+    var em=document.getElementById("bc-email").value.trim().toLowerCase();
+    var match = state.users.filter(function(u){return (u.email||"").toLowerCase()===em})[0];
+    if(!match){notify("No user with that email","error");return}
+    targetIds=[match.id];
+  }
+  try{
+    var {data,error} = await sb.rpc("fn_admin_broadcast",{
+      p_admin_id: state.admin.id,
+      p_kind: kind,
+      p_title: title,
+      p_body: body||null,
+      p_link: null,
+      p_target_user_ids: targetIds
+    });
+    if(error) throw new Error(error.message);
+    notify("Sent to "+data.sent+" user"+(data.sent===1?"":"s"),"success");
+    await refreshAll();
+    render();
+  }catch(e){ notify(e.message||"Could not send","error") }
 }
 
 function brandSvg(size){
@@ -435,7 +568,6 @@ function renderTopBar(){
     '<div class="hamburger"><button class="hb" onclick="toggleDrawer()" aria-label="Menu"><span></span><span></span><span></span></button></div>'+
   '</div>';
 }
-
 function renderLogin(){
   return '<div class="card" style="max-width:520px;">'+
     '<div class="hero"><h2>Restricted area</h2><p>Sign in with an admin account.</p></div>'+
@@ -445,7 +577,6 @@ function renderLogin(){
     '<p class="muted center" style="margin-top:14px;">Not an admin? <a href="index.html">Back to main app</a></p>'+
   '</div>';
 }
-
 function tabBtn(key,label){return '<button class="tab'+(state.tab===key?" active":"")+'" onclick="setTab(\''+key+'\')">'+label+'</button>'}
 
 function renderOverview(){
@@ -454,6 +585,7 @@ function renderOverview(){
   var pendingDeps=state.deposits.filter(function(d){return d.status==="pending"});
   var pendingWds=state.withdrawals.filter(function(w){return w.status==="pending"});
   var pendingWallet=state.walletDeposits.filter(function(w){return w.status==="pending"});
+  var pendingPayout=state.payoutMethods.filter(function(p){return p.status==="pending"});
   var totalTaskBal=0,totalAffBal=0,totalAdvBal=0,totalEscrow=0;
   state.users.forEach(function(u){
     totalTaskBal+=Number(u.task_balance||0);
@@ -463,8 +595,7 @@ function renderOverview(){
   state.tasks.forEach(function(t){
     if(t.status==="live") totalEscrow+=Number(t.escrow_remaining||0);
   });
-  var totalPlatformRev=0;
-  state.platformRevenue.forEach(function(r){totalPlatformRev+=Number(r.amount||0)});
+  var totalRev=0; state.platformRevenue.forEach(function(r){totalRev+=Number(r.amount||0)});
 
   return '<div class="stats-row">'+
       '<div class="stat"><div class="stat-label">Pending submissions</div><div class="stat-value">'+pendingSubs.length+'</div></div>'+
@@ -472,13 +603,14 @@ function renderOverview(){
       '<div class="stat"><div class="stat-label">Pending tier deposits</div><div class="stat-value">'+pendingDeps.length+'</div></div>'+
       '<div class="stat"><div class="stat-label">Pending wallet fundings</div><div class="stat-value">'+pendingWallet.length+'</div></div>'+
       '<div class="stat"><div class="stat-label">Pending withdrawals</div><div class="stat-value">'+pendingWds.length+'</div></div>'+
+      '<div class="stat"><div class="stat-label">Pending payout methods</div><div class="stat-value">'+pendingPayout.length+'</div></div>'+
       '<div class="stat"><div class="stat-label">Users</div><div class="stat-value">'+state.users.length+'</div></div>'+
     '</div>'+
     '<div class="stats-row" style="margin-top:14px;">'+
-      '<div class="stat"><div class="stat-label">Platform revenue (lifetime)</div><div class="stat-value">'+fmtN(totalPlatformRev)+'</div></div>'+
-      '<div class="stat"><div class="stat-label">Escrow held (live tasks)</div><div class="stat-value">'+fmtN(totalEscrow)+'</div></div>'+
+      '<div class="stat"><div class="stat-label">Platform revenue</div><div class="stat-value">'+fmtN(totalRev)+'</div></div>'+
+      '<div class="stat"><div class="stat-label">Escrow held</div><div class="stat-value">'+fmtN(totalEscrow)+'</div></div>'+
       '<div class="stat"><div class="stat-label">Advertiser balances</div><div class="stat-value">'+fmtN(totalAdvBal)+'</div></div>'+
-      '<div class="stat"><div class="stat-label">Worker + affiliate balances</div><div class="stat-value">'+fmtN(totalTaskBal+totalAffBal)+'</div></div>'+
+      '<div class="stat"><div class="stat-label">Worker + affiliate</div><div class="stat-value">'+fmtN(totalTaskBal+totalAffBal)+'</div></div>'+
     '</div>'+
     '<div class="hero" style="margin-top:20px;"><h2>Recent activity</h2><p>Newest events across the platform.</p></div>'+
     (state.auditLog.slice(0,10).map(function(a){
@@ -520,11 +652,10 @@ function renderTasksTab(){
        return '<div class="row"><div>'+
          '<span class="pill" style="background:'+color+';">'+t.category+'</span> '+
          '<strong>'+fmtN(t.reward)+'</strong> × '+t.quantity+
-         '<div class="dim" style="font-size:12px;">'+t.completed+'/'+t.quantity+' done &middot; status: '+t.status+' &middot; advertiser: '+esc(adv?adv.email:"?")+'</div>'+
-         '<div class="dim" style="font-size:12px;">escrow: '+fmtN(t.escrow_remaining||0)+' of '+fmtN(t.escrow_total||t.advertiser_total||0)+' remaining</div>'+
-         '<div class="dim" style="font-size:12px;word-break:break-all;">'+esc((t.link||"").slice(0,80))+'</div>'+
+         '<div class="dim" style="font-size:12px;">'+t.completed+'/'+t.quantity+' done &middot; '+t.status+' &middot; advertiser: '+esc(adv?adv.email:"?")+'</div>'+
+         '<div class="dim" style="font-size:12px;">escrow: '+fmtN(t.escrow_remaining||0)+' / '+fmtN(t.escrow_total||t.advertiser_total||0)+'</div>'+
        '</div><div style="display:flex;gap:6px;flex-wrap:wrap;">'+
-         (canApprove?'<button class="btn btn-sm btn-primary" onclick="approveTask(\''+t.id+'\')">Approve &amp; publish</button>':"")+
+         (canApprove?'<button class="btn btn-sm btn-primary" onclick="approveTask(\''+t.id+'\')">Approve</button>':"")+
          (canPause?'<button class="btn btn-sm btn-ghost" onclick="pauseTask(\''+t.id+'\')">'+(t.status==="paused"?"Resume":"Pause")+'</button>':"")+
          '<button class="btn btn-sm btn-ghost" onclick="openEditTask(\''+t.id+'\')">Edit</button>'+
          (canCancel?'<button class="btn btn-sm btn-danger" onclick="cancelTask(\''+t.id+'\')">Cancel &amp; refund</button>':"")+
@@ -541,22 +672,24 @@ function renderUsersTab(){
   return '<div class="search-box"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg><input id="user-search" placeholder="Search users" value="'+esc(state.search)+'" /></div>'+
     '<div class="muted" style="margin-bottom:8px;font-size:13px;">Showing '+filtered.length+' of '+state.users.length+'</div>'+
     (filtered.map(function(u){
-      return '<div class="row"><div>'+
+      return '<div class="row"><div onclick="openUserDetail(\''+u.id+'\')" style="cursor:pointer;flex:1;">'+
         '<strong>'+esc(u.name)+'</strong> <span class="muted">'+esc(u.email)+'</span>'+
         '<div class="dim" style="font-size:12px;">tier: '+tierById(u.tier_id).name+' &middot; task '+fmtN(u.task_balance)+' &middot; adv '+fmtN(u.advertiser_balance)+' &middot; affil '+fmtN(u.affiliate_balance)+'</div>'+
         '<div class="dim" style="font-size:12px;">'+(u.is_admin?"ADMIN ":"")+(u.verified?"verified ":"")+(u.banned?"BANNED ":"")+'ref: '+esc(u.ref_code||"")+'</div>'+
       '</div><div style="display:flex;gap:6px;flex-wrap:wrap;">'+
         '<button class="btn btn-sm btn-ghost" onclick="openEditUser(\''+u.id+'\')">Edit</button>'+
         '<button class="btn btn-sm btn-ghost" onclick="openAdjustBalance(\''+u.id+'\',\'task_balance\')">± Task</button>'+
-        '<button class="btn btn-sm btn-ghost" onclick="openAdjustBalance(\''+u.id+'\',\'affiliate_balance\')">± Affil</button>'+
         '<button class="btn btn-sm btn-ghost" onclick="openAdjustBalance(\''+u.id+'\',\'advertiser_balance\')">± Adv</button>'+
+        '<button class="btn btn-sm btn-ghost" onclick="openAdjustBalance(\''+u.id+'\',\'affiliate_balance\')">± Affil</button>'+
       '</div></div>';
     }).join("") || '<p class="muted">No users match.</p>');
 }
 
 function renderFinanceTab(){
   var walletPending=state.walletDeposits.filter(function(w){return w.status==="pending"});
-  var walletRest=state.walletDeposits.filter(function(w){return w.status!=="pending"}).slice(0,20);
+  var walletRest=state.walletDeposits.filter(function(w){return w.status!=="pending"}).slice(0,15);
+  var payoutPending=state.payoutMethods.filter(function(p){return p.status==="pending"});
+  var payoutRest=state.payoutMethods.filter(function(p){return p.status!=="pending"}).slice(0,15);
   var totalRev=0; state.platformRevenue.forEach(function(r){totalRev+=Number(r.amount||0)});
 
   function walletRow(w,isPending){
@@ -567,15 +700,33 @@ function renderFinanceTab(){
       (isPending?'<div style="display:flex;gap:6px;"><button class="btn btn-sm btn-primary" onclick="approveWalletFund(\''+w.id+'\')">Approve</button><button class="btn btn-sm btn-danger" onclick="rejectWalletFund(\''+w.id+'\')">Reject</button></div>':"")+
     '</div>';
   }
+  function payoutRow(p,isPending){
+    var u=state.users.filter(function(x){return x.id===p.user_id})[0];
+    var color=p.status==="pending"?"#d97706":p.status==="approved"?"#16a34a":"#dc2626";
+    return '<div class="row"><div><strong>'+(u?esc(u.name):"?")+'</strong> — '+esc(p.bank_name)+' ••••'+esc(p.account_number.slice(-4))+
+      '<div class="dim" style="font-size:12px;">name: '+esc(p.account_name)+' &middot; email: '+(u?esc(u.email):"?")+' &middot; '+new Date(Number(p.ts)).toLocaleString()+' &middot; <span class="pill" style="background:'+color+';">'+p.status+'</span></div>'+
+      (p.admin_note?'<div class="dim" style="font-size:12px;">note: '+esc(p.admin_note)+'</div>':"")+
+    '</div>'+
+    (isPending?'<div style="display:flex;gap:6px;flex-wrap:wrap;">'+
+      '<button class="btn btn-sm btn-primary" onclick="approvePayoutMethod(\''+p.id+'\')">Approve</button>'+
+      '<button class="btn btn-sm btn-ghost" onclick="editPayoutMethod(\''+p.id+'\')">Edit</button>'+
+      '<button class="btn btn-sm btn-danger" onclick="rejectPayoutMethod(\''+p.id+'\')">Reject</button>'+
+    '</div>':"")+'</div>';
+  }
 
   return '<div class="stats-row" style="margin-bottom:20px;">'+
-      '<div class="stat"><div class="stat-label">Platform revenue (lifetime)</div><div class="stat-value">'+fmtN(totalRev)+'</div></div>'+
+      '<div class="stat"><div class="stat-label">Platform revenue</div><div class="stat-value">'+fmtN(totalRev)+'</div></div>'+
       '<div class="stat"><div class="stat-label">Wallet fundings pending</div><div class="stat-value">'+walletPending.length+'</div></div>'+
+      '<div class="stat"><div class="stat-label">Payout methods pending</div><div class="stat-value">'+payoutPending.length+'</div></div>'+
     '</div>'+
 
-    '<h3>Wallet fundings (pending '+walletPending.length+')</h3>'+
+    '<h3>Wallet fundings — pending ('+walletPending.length+')</h3>'+
     (walletPending.length===0?'<p class="muted">None pending.</p>':walletPending.map(function(w){return walletRow(w,true)}).join(""))+
     (walletRest.length?'<h3 style="margin-top:18px;">Recent wallet fundings</h3>'+walletRest.map(function(w){return walletRow(w,false)}).join(""):"")+
+
+    '<h3 style="margin-top:22px;">Payout methods — pending ('+payoutPending.length+')</h3>'+
+    (payoutPending.length===0?'<p class="muted">None pending.</p>':payoutPending.map(function(p){return payoutRow(p,true)}).join(""))+
+    (payoutRest.length?'<h3 style="margin-top:18px;">Recent payout methods</h3>'+payoutRest.map(function(p){return payoutRow(p,false)}).join(""):"")+
 
     '<h3 style="margin-top:22px;">Tier deposit claims</h3>'+
     (state.deposits.length===0?'<p class="muted">None yet.</p>':
@@ -593,13 +744,48 @@ function renderFinanceTab(){
     (state.withdrawals.length===0?'<p class="muted">None yet.</p>':
      state.withdrawals.map(function(w){
        var u=state.users.filter(function(x){return x.id===w.user_id})[0];
+       var pm=state.payoutMethods.filter(function(p){return p.user_id===w.user_id && p.status==="approved"})[0];
        var color=w.status==="pending"?"#d97706":w.status==="approved"?"#16a34a":"#dc2626";
        return '<div class="row"><div><strong>'+(u?esc(u.name):"?")+'</strong> — '+w.type+' — gross '+fmtN(w.amount)+' — fee '+fmtN(w.fee)+' — net '+fmtN(w.net)+
-         '<div class="dim" style="font-size:12px;">'+new Date(Number(w.ts)).toLocaleString()+'</div></div>'+
+         '<div class="dim" style="font-size:12px;">'+new Date(Number(w.ts)).toLocaleString()+(pm?' &middot; pay to: '+esc(pm.bank_name)+' ••••'+esc(pm.account_number.slice(-4)):'')+'</div></div>'+
          '<div style="display:flex;gap:6px;align-items:center;"><span class="pill" style="background:'+color+';">'+w.status+'</span>'+
          (w.status==="pending"?'<button class="btn btn-sm btn-primary" onclick="approveWithdrawal(\''+w.id+'\')">Mark paid</button><button class="btn btn-sm btn-danger" onclick="rejectWithdrawal(\''+w.id+'\')">Reject</button>':"")+
          '</div></div>';
      }).join(""));
+}
+
+function renderBroadcastTab(){
+  var mode = state.broadcastMode;
+  return '<div class="card" style="max-width:none;">'+
+    '<h2 style="margin-top:0;">Send a notification</h2>'+
+    '<p class="muted" style="font-size:13px;">Sends to users immediately. If their TaskLoop tab is open, they will see a browser popup too.</p>'+
+    '<label class="lbl">Target</label>'+
+    '<select onchange="setBroadcastMode(this.value)">'+
+      '<option value="all"'+(mode==="all"?" selected":"")+'>Everyone ('+state.users.length+' users)</option>'+
+      '<option value="one"'+(mode==="one"?" selected":"")+'>One specific user</option>'+
+    '</select>'+
+    (mode==="one"?'<label class="lbl">User email</label><input id="bc-email" placeholder="user@example.com" value="'+esc(state.broadcastTargetEmail||"")+'" />':"")+
+    '<label class="lbl">Kind</label>'+
+    '<select id="bc-kind">'+
+      ['broadcast','info','success','warning','money'].map(function(k){
+        return '<option value="'+k+'"'+(state.broadcastKind===k?" selected":"")+'>'+k+'</option>';
+      }).join("")+
+    '</select>'+
+    '<label class="lbl">Title</label><input id="bc-title" placeholder="e.g. New tasks available this week" />'+
+    '<label class="lbl">Message</label><textarea id="bc-body" style="min-height:90px;" placeholder="Optional details"></textarea>'+
+    '<button class="btn btn-primary btn-full" onclick="sendBroadcast()">Send now</button>'+
+
+    '<h3 style="margin-top:24px;">Recent broadcasts</h3>'+
+    (function(){
+      var bcs = state.auditLog.filter(function(a){return a.action==="broadcast"}).slice(0,10);
+      return bcs.length===0 ? '<p class="muted">None yet.</p>' :
+        bcs.map(function(a){
+          var d=a.details||{};
+          return '<div class="row"><div><strong>'+esc(d.title||"")+'</strong>'+
+            '<div class="dim" style="font-size:12px;">sent to '+(d.count||0)+' user(s) &middot; '+new Date(Number(a.ts)).toLocaleString()+'</div></div></div>';
+        }).join("");
+    })()+
+  '</div>';
 }
 
 function renderFraudTab(){
@@ -635,33 +821,103 @@ function renderAuditTab(){
 
 function renderSettingsTab(){
   if(!state.settings) return '<p class="muted">Loading settings…</p>';
+
+  // ---- Task availability ----
   var daysHtml = DAY_NAMES.map(function(name,i){
     var blocked=state.editBlockedDays.indexOf(i)!==-1;
     return '<button class="day-btn '+(blocked?"blocked":"allowed")+'" onclick="toggleDay('+i+')">'+name+'</button>';
   }).join("");
-  var datesHtml = state.editBlockedDates.length===0 ? '<p class="muted" style="font-size:13px;">No blackout dates set.</p>' :
+  var datesHtml = state.editBlockedDates.length===0 ? '<p class="muted" style="font-size:13px;">No blackout dates.</p>' :
     state.editBlockedDates.map(function(d){
       return '<span class="pill" style="background:#334155; margin:4px; cursor:pointer;" onclick="removeBlockedDate(\''+d+'\')">'+d+' ×</span>';
     }).join("");
-  return '<div class="hero"><h2>Platform settings</h2><p>Control when tasks can run across the whole platform.</p></div>'+
-    '<div class="card" style="max-width:none;">'+
-      '<h3>Blocked days of the week</h3>'+
-      '<p class="muted" style="font-size:13px;">Red days are paused — workers cannot start tasks. Green days are open. The server enforces this, so it cannot be bypassed from the browser.</p>'+
-      '<div class="day-toggle">'+daysHtml+'</div>'+
 
-      '<h3 style="margin-top:22px;">Blackout dates (specific)</h3>'+
-      '<p class="muted" style="font-size:13px;">Add one-off dates when tasks should be paused (e.g. Christmas Day, election day).</p>'+
-      '<div style="margin-bottom:12px;">'+datesHtml+'</div>'+
-      '<div style="display:flex;gap:8px;align-items:flex-end;">'+
-        '<div style="flex:1;"><label class="lbl">Add a blackout date</label><input id="new-blocked-date" type="date" /></div>'+
-        '<button class="btn btn-ghost" onclick="addBlockedDate()">Add</button>'+
+  // ---- Withdrawal days editor (two modes: DOW and DOM) ----
+  function dowRow(type, label){
+    var arr = type==="task" ? state.editWithdrawTaskDays : state.editWithdrawAffiliateDays;
+    return '<div style="margin-bottom:6px;"><strong style="font-size:13px;">'+label+'</strong></div>'+
+      DAY_NAMES.map(function(name,i){
+        var on = arr.indexOf(i)!==-1;
+        return '<button class="month-day'+(on?' on':'')+'" onclick="toggleWithdrawDow(\''+type+'\','+i+')">'+name+'</button>';
+      }).join("")+
+      '<div class="dim" style="font-size:11px;margin-top:4px;">Or use days of month below ↓</div>';
+  }
+  function domRow(type){
+    var arr = type==="task" ? state.editWithdrawTaskDays : state.editWithdrawAffiliateDays;
+    var days=[];
+    for(var d=1; d<=31; d++){
+      var on = arr.indexOf(d)!==-1;
+      days.push('<span class="month-day'+(on?' on':'')+'" onclick="toggleWithdrawDom(\''+type+'\','+d+')">'+d+'</span>');
+    }
+    return '<div style="margin-top:6px;">'+days.join("")+'</div>'+
+      '<button class="btn btn-ghost btn-sm" onclick="clearWithdrawDays(\''+type+'\')" style="margin-top:8px;">Clear</button>';
+  }
+
+  // ---- Support ----
+  var sp = state.editSupport||{};
+  function sfield(key,label){
+    return '<label class="lbl">'+label+'</label><input value="'+esc(sp[key]||"")+'" oninput="updateSupportField(\''+key+'\',this.value)" />';
+  }
+
+  return '<div class="hero"><h2>Platform settings</h2><p>Everything that controls the marketplace: task days, withdrawal schedule, fee, minimums, and support contacts.</p></div>'+
+
+    '<div class="card" style="max-width:none;">'+
+      '<div class="settings-section">'+
+        '<h3>Task availability — blocked days of the week</h3>'+
+        '<p class="hint">Red days are paused. Server enforces this — cannot be bypassed from the browser.</p>'+
+        '<div class="day-toggle">'+daysHtml+'</div>'+
       '</div>'+
 
-      '<h3 style="margin-top:22px;">Task expiry</h3>'+
-      '<label class="lbl">Days until an unfunded or unfinished task auto-expires</label>'+
-      '<input id="expiry-days" type="number" value="'+(state.editExpiryDays||30)+'" min="1" max="365" />'+
+      '<div class="settings-section">'+
+        '<h3>Blackout dates (specific)</h3>'+
+        '<p class="hint">One-off dates when tasks are paused.</p>'+
+        '<div style="margin-bottom:12px;">'+datesHtml+'</div>'+
+        '<div style="display:flex;gap:8px;align-items:flex-end;">'+
+          '<div style="flex:1;"><label class="lbl">Add a blackout date</label><input id="new-blocked-date" type="date" /></div>'+
+          '<button class="btn btn-ghost" onclick="addBlockedDate()">Add</button>'+
+        '</div>'+
+      '</div>'+
 
-      '<button class="btn btn-primary btn-full" onclick="saveSettings()">Save settings</button>'+
+      '<div class="settings-section">'+
+        '<h3>Task expiry</h3>'+
+        '<label class="lbl">Days until an unfinished task auto-expires</label>'+
+        '<input id="expiry-days" type="number" value="'+(state.editExpiryDays||30)+'" min="1" max="365" />'+
+      '</div>'+
+
+      '<div class="settings-section">'+
+        '<h3>Withdrawal schedule — Task earnings</h3>'+
+        '<p class="hint">Choose either weekdays OR days-of-month. To switch modes, clear first and then pick the other.</p>'+
+        dowRow("task","Days of week")+
+        domRow("task")+
+      '</div>'+
+
+      '<div class="settings-section">'+
+        '<h3>Withdrawal schedule — Affiliate earnings</h3>'+
+        dowRow("affiliate","Days of week")+
+        domRow("affiliate")+
+      '</div>'+
+
+      '<div class="settings-section">'+
+        '<h3>Withdrawal amounts</h3>'+
+        '<label class="lbl">Minimum — Task (₦)</label><input id="wd-min-task" type="number" value="'+state.editWithdrawMinTask+'" />'+
+        '<label class="lbl">Minimum — Affiliate (₦)</label><input id="wd-min-affiliate" type="number" value="'+state.editWithdrawMinAffiliate+'" />'+
+        '<label class="lbl">Fee percentage (%)</label><input id="wd-fee-pct" type="number" value="'+state.editWithdrawFeePct+'" min="0" max="50" />'+
+      '</div>'+
+
+      '<button class="btn btn-primary btn-full" onclick="saveSettings()">Save all settings</button>'+
+    '</div>'+
+
+    '<div class="card" style="max-width:none; margin-top:20px;">'+
+      '<h2 style="margin-top:0;">Support contacts</h2>'+
+      '<p class="muted" style="font-size:13px;">Shown on the user Support page. Leave any field blank to hide it.</p>'+
+      sfield("whatsapp_number","WhatsApp number (e.g. +234...)" )+
+      sfield("telegram_username","Telegram username (e.g. @taskloop)")+
+      sfield("support_email","Support email")+
+      sfield("whatsapp_group_link","WhatsApp group invite link")+
+      sfield("telegram_group_link","Telegram group link")+
+      sfield("whatsapp_channel_link","WhatsApp channel link")+
+      sfield("telegram_channel_link","Telegram channel link")+
+      '<button class="btn btn-primary btn-full" onclick="saveSupport()">Save support contacts</button>'+
     '</div>';
 }
 
@@ -670,6 +926,7 @@ function renderAdminBody(){
   if(state.tab==="tasks") return renderTasksTab();
   if(state.tab==="users") return renderUsersTab();
   if(state.tab==="finance") return renderFinanceTab();
+  if(state.tab==="broadcast") return renderBroadcastTab();
   if(state.tab==="fraud") return renderFraudTab();
   if(state.tab==="audit") return renderAuditTab();
   if(state.tab==="settings") return renderSettingsTab();
@@ -677,13 +934,70 @@ function renderAdminBody(){
 }
 
 function renderTabs(){
-  var keys=[["overview","Overview"],["submissions","Submissions"],["tasks","Tasks"],["users","Users"],["finance","Finance"],["fraud","Fraud & risk"],["audit","Audit log"],["settings","Settings"]];
+  var keys=[["overview","Overview"],["submissions","Submissions"],["tasks","Tasks"],["users","Users"],["finance","Finance"],["broadcast","Broadcast"],["fraud","Fraud & risk"],["audit","Audit log"],["settings","Settings"]];
   return '<div class="tabs">'+keys.map(function(p){return tabBtn(p[0],p[1])}).join("")+'</div>';
+}
+
+function renderUserDetailModal(id){
+  var u=state.users.filter(function(x){return x.id===id})[0];
+  if(!u) return "";
+  var referrals = state.users.filter(function(x){return x.referred_by===id});
+  var mySubs = state.submissions.filter(function(s){return s.worker_id===id});
+  var myTasksPosted = state.tasks.filter(function(t){return t.advertiser_id===id});
+  var myWithdrawals = state.withdrawals.filter(function(w){return w.user_id===id});
+  var myPayout = state.payoutMethods.filter(function(p){return p.user_id===id});
+  var myLedger = state.ledger.filter(function(l){return l.user_id===id}).slice(0,10);
+
+  return '<div class="modal-scrim" onclick="if(event.target===this)closeModal()"><div class="modal">'+
+    '<div class="modal-head"><strong>'+esc(u.name)+'</strong><button class="modal-close" onclick="closeModal()">×</button></div>'+
+    '<div class="modal-body">'+
+      '<div class="kv">'+
+        '<div>User ID</div><div style="word-break:break-all;">'+esc(u.id)+'</div>'+
+        '<div>Email</div><div>'+esc(u.email)+'</div>'+
+        '<div>Tier</div><div>'+tierById(u.tier_id).name+'</div>'+
+        '<div>Referral code</div><div>'+esc(u.ref_code||"")+'</div>'+
+        '<div>Referred by</div><div>'+esc(u.referred_by||"—")+'</div>'+
+        '<div>Task balance</div><div>'+fmtN(u.task_balance)+'</div>'+
+        '<div>Advertiser balance</div><div>'+fmtN(u.advertiser_balance)+'</div>'+
+        '<div>Affiliate balance</div><div>'+fmtN(u.affiliate_balance)+'</div>'+
+        '<div>Flags</div><div>'+(u.is_admin?"ADMIN ":"")+(u.verified?"verified ":"")+(u.banned?"BANNED ":"")+'</div>'+
+        '<div>Joined</div><div>'+new Date(Number(u.created_at)).toLocaleString()+'</div>'+
+      '</div>'+
+      '<h3 style="margin-top:18px;">Referrals made ('+referrals.length+')</h3>'+
+      (referrals.length===0?'<p class="muted">None.</p>':referrals.slice(0,10).map(function(r){
+        return '<div class="row"><div>'+esc(r.name)+' <span class="muted">'+esc(r.email)+'</span></div></div>';
+      }).join(""))+
+      '<h3 style="margin-top:18px;">Submissions ('+mySubs.length+')</h3>'+
+      '<p class="muted" style="font-size:13px;">approved '+mySubs.filter(function(s){return s.status==="approved"}).length+
+        ' · pending '+mySubs.filter(function(s){return s.status==="pending"}).length+
+        ' · rejected '+mySubs.filter(function(s){return s.status==="rejected"}).length+'</p>'+
+      '<h3 style="margin-top:18px;">Tasks posted ('+myTasksPosted.length+')</h3>'+
+      '<p class="muted" style="font-size:13px;">'+myTasksPosted.filter(function(t){return t.status==="live"}).length+' live · '+
+        myTasksPosted.filter(function(t){return t.status==="completed"}).length+' completed</p>'+
+      '<h3 style="margin-top:18px;">Withdrawals ('+myWithdrawals.length+')</h3>'+
+      (myWithdrawals.length===0?'<p class="muted">None.</p>':myWithdrawals.slice(0,10).map(function(w){
+        var color=w.status==="pending"?"#d97706":w.status==="approved"?"#16a34a":"#dc2626";
+        return '<div class="row"><div>'+w.type+' — gross '+fmtN(w.amount)+' — net '+fmtN(w.net)+'<div class="dim" style="font-size:12px;">'+new Date(Number(w.ts)).toLocaleString()+'</div></div><span class="pill" style="background:'+color+';">'+w.status+'</span></div>';
+      }).join(""))+
+      '<h3 style="margin-top:18px;">Payout methods ('+myPayout.length+')</h3>'+
+      (myPayout.length===0?'<p class="muted">None.</p>':myPayout.slice(0,5).map(function(p){
+        var color=p.status==="pending"?"#d97706":p.status==="approved"?"#16a34a":"#dc2626";
+        return '<div class="row"><div>'+esc(p.bank_name)+' ••••'+esc(p.account_number.slice(-4))+'<div class="dim" style="font-size:12px;">'+esc(p.account_name)+'</div></div><span class="pill" style="background:'+color+';">'+p.status+'</span></div>';
+      }).join(""))+
+      '<h3 style="margin-top:18px;">Recent ledger</h3>'+
+      (myLedger.length===0?'<p class="muted">None.</p>':myLedger.map(function(l){
+        var amt=Number(l.amount);
+        return '<div class="row"><div>'+esc(l.note)+'<div class="dim" style="font-size:12px;">'+new Date(Number(l.ts)).toLocaleString()+'</div></div><div style="color:'+(amt>=0?"#16a34a":"#dc2626")+';font-weight:700;">'+(amt>=0?"+":"")+fmtN(amt)+'</div></div>';
+      }).join(""))+
+    '</div>'+
+    '<div class="modal-foot"><button class="btn btn-primary" onclick="openEditUser(\''+u.id+'\')">Edit user</button><button class="btn btn-ghost" onclick="closeModal()">Close</button></div>'+
+  '</div></div>';
 }
 
 function renderModal(){
   if(!state.modal) return "";
   var m=state.modal;
+  if(m.type==="userDetail") return renderUserDetailModal(m.id);
   if(m.type==="user"){
     var u=state.users.filter(function(x){return x.id===m.id})[0];
     if(!u){state.modal=null;return ""}
@@ -710,7 +1024,7 @@ function renderModal(){
       '<div class="modal-head"><strong>Edit task</strong><button class="modal-close" onclick="closeModal()">×</button></div>'+
       '<div class="modal-body">'+
         '<div class="kv"><div>Task ID</div><div style="word-break:break-all;">'+esc(t.id)+'</div></div>'+
-        '<div class="kv"><div>Escrow remaining</div><div>'+fmtN(t.escrow_remaining||0)+' of '+fmtN(t.escrow_total||t.advertiser_total||0)+'</div></div>'+
+        '<div class="kv"><div>Escrow remaining</div><div>'+fmtN(t.escrow_remaining||0)+' / '+fmtN(t.escrow_total||t.advertiser_total||0)+'</div></div>'+
         '<label class="lbl">Category</label><select id="et-category">'+catOpts+'</select>'+
         '<label class="lbl">Reward per task</label><input id="et-reward" type="number" value="'+t.reward+'" />'+
         '<label class="lbl">Quantity</label><input id="et-quantity" type="number" value="'+t.quantity+'" />'+
@@ -747,7 +1061,7 @@ function renderModal(){
 function render(){
   var body;
   if(!state.admin) body=renderLogin();
-  else body='<div class="hero"><h2>Admin control room</h2><p>Read and edit every user, task, submission, deposit, and withdrawal. Every money edit is logged.</p>'+
+  else body='<div class="hero"><h2>Admin control room</h2><p>Read and edit every user, task, submission, deposit, withdrawal, and settings. Every money edit is logged.</p>'+
     '<div style="margin-top:12px;"><button class="btn btn-ghost btn-sm" onclick="runSweep()">Run 24-hour sweep</button> <button class="btn btn-ghost btn-sm" onclick="refreshAll().then(render)">Refresh data</button></div></div>'+
     renderTabs()+renderAdminBody();
 
@@ -757,6 +1071,10 @@ function render(){
   var si=document.getElementById("user-search");
   if(si){
     si.oninput=function(){ state.search=si.value; var cur=si.selectionStart; render(); var n=document.getElementById("user-search"); if(n){n.focus(); try{n.setSelectionRange(cur,cur)}catch(e){}} };
+  }
+  // Prefill support edit buffer if empty
+  if(state.tab==="settings" && state.support && (!state.editSupport || Object.keys(state.editSupport).length===0)){
+    state.editSupport = Object.assign({}, state.support);
   }
   if(!render._hooked){
     render._hooked=true;

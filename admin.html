@@ -173,9 +173,9 @@
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script>
 /* ============================================================
-   TaskLoop — admin portal
-   Includes: support toggles, 24h flags, full bank details,
-   bank accounts editor, broadcast, audit.
+   TaskLoop — admin portal (final)
+   Includes: tier benefits editor, support toggles, bank editor,
+   24h flags, full bank details, broadcast, audit.
    ============================================================ */
 
 var SUPABASE_URL = "https://jcajknuldlkuwtxhymbt.supabase.co";
@@ -204,7 +204,7 @@ var state = {
   admin: null,
   users: [], tasks: [], submissions: [], withdrawals: [], deposits: [],
   walletDeposits: [], payoutMethods: [], ledger: [], auditLog: [],
-  platformRevenue: [], settings: null, support: null,
+  platformRevenue: [], settings: null, support: null, tierBenefits: [],
   tab: "overview",
   modal: null,
   search: "",
@@ -301,14 +301,14 @@ function logout(){
   state.admin=null;
   state.users=[];state.tasks=[];state.submissions=[];state.withdrawals=[];state.deposits=[];
   state.walletDeposits=[];state.payoutMethods=[];state.ledger=[];state.auditLog=[];
-  state.platformRevenue=[];state.settings=null;state.support=null;
+  state.platformRevenue=[];state.settings=null;state.support=null;state.tierBenefits=[];
   closeDrawer();
   render();
 }
 
 async function refreshAll(){
   if(!state.admin) return;
-  var [u,t,s,w,d,wd,pm,l,a,pr,st,sc] = await Promise.all([
+  var [u,t,s,w,d,wd,pm,l,a,pr,st,sc,tb] = await Promise.all([
     sb.from("users").select("*").order("created_at",{ascending:false}),
     sb.from("tasks").select("*").order("created_at",{ascending:false}),
     sb.from("submissions").select("*").order("submitted_at",{ascending:false}).limit(300),
@@ -320,7 +320,8 @@ async function refreshAll(){
     sb.from("audit_log").select("*").order("ts",{ascending:false}).limit(200),
     sb.from("platform_revenue").select("*").order("ts",{ascending:false}).limit(500),
     sb.from("platform_settings").select("*").eq("id","main").single(),
-    sb.from("support_contacts").select("*").eq("id","main").single()
+    sb.from("support_contacts").select("*").eq("id","main").single(),
+    sb.from("tier_benefits").select("*").order("multiplier",{ascending:true})
   ]);
   state.users = u.data||[];
   state.tasks = t.data||[];
@@ -334,6 +335,7 @@ async function refreshAll(){
   state.platformRevenue = pr.data||[];
   state.settings = st.data||null;
   state.support = sc.data||null;
+  state.tierBenefits = tb.data||[];
 }
 
 async function callAdmin(fnName, params, successMsg){
@@ -541,6 +543,66 @@ function saveBanks(){
   },"Bank accounts saved");
 }
 
+/* ---------- TIER BENEFITS ---------- */
+function tbPreview(tierId){
+  var b = (state.tierBenefits||[]).filter(function(x){return x.tier_id===tierId})[0];
+  if(!b) return { platform: 0, pct: 0 };
+  var base = 10;
+  var escrow = base * 1.5;
+  var worker = base * Number(b.multiplier||1);
+  var ref = base * Number(b.referral_pct||0.02);
+  var platform = escrow - worker - ref;
+  var pct = escrow > 0 ? (platform/escrow*100) : 0;
+  return { platform: platform, pct: pct };
+}
+function updateTB(tierId, key, value){
+  state.tierBenefits = (state.tierBenefits||[]).map(function(b){
+    if(b.tier_id !== tierId) return b;
+    var next = Object.assign({}, b);
+    next[key] = value;
+    return next;
+  });
+  render();
+}
+function updateTBDays(tierId, field, day, on){
+  state.tierBenefits = (state.tierBenefits||[]).map(function(b){
+    if(b.tier_id !== tierId) return b;
+    var next = Object.assign({}, b);
+    var arr = (next[field]||[]).slice();
+    var idx = arr.indexOf(day);
+    if(on && idx === -1) arr.push(day);
+    if(!on && idx !== -1) arr.splice(idx,1);
+    arr.sort(function(x,y){return x-y});
+    next[field] = arr;
+    return next;
+  });
+  render();
+}
+async function saveTierBenefit(tierId){
+  var b = (state.tierBenefits||[]).filter(function(x){return x.tier_id===tierId})[0];
+  if(!b){notify("Tier not found","error");return}
+  try{
+    var {data,error} = await sb.rpc("fn_admin_update_tier_benefit",{
+      p_admin_id: state.admin.id,
+      p_tier_id: tierId,
+      p_multiplier: Number(b.multiplier),
+      p_withdraw_task_days: b.withdraw_task_days,
+      p_withdraw_affiliate_days: b.withdraw_affiliate_days,
+      p_withdraw_min_task: Number(b.withdraw_min_task),
+      p_withdraw_min_affiliate: Number(b.withdraw_min_affiliate),
+      p_withdraw_fee_pct: Number(b.withdraw_fee_pct),
+      p_premium_access: !!b.premium_access,
+      p_premium_first: !!b.premium_first,
+      p_support_sla_hours: Number(b.support_sla_hours),
+      p_monthly_incentive_cap: Number(b.monthly_incentive_cap),
+      p_referral_pct: Number(b.referral_pct)
+    });
+    if(error) throw new Error(error.message);
+    notify("Saved " + tierId + " benefits","success");
+    await refreshAll();
+  }catch(e){ notify(e.message||"Could not save","error") }
+}
+
 function setBroadcastMode(m){ state.broadcastMode=m; render() }
 async function sendBroadcast(){
   var title=document.getElementById("bc-title").value.trim();
@@ -669,6 +731,7 @@ function renderTasksTab(){
        var canCancel=t.status==="live"||t.status==="paused"||t.status==="pending_approval";
        return '<div class="row"><div>'+
          '<span class="pill" style="background:'+color+';">'+t.category+'</span> '+
+         (t.premium?'<span class="pill" style="background:#f59e0b;">★ premium</span> ':'')+
          '<strong>'+fmtN(t.reward)+'</strong> × '+t.quantity+
          '<div class="dim" style="font-size:12px;">'+t.completed+'/'+t.quantity+' done &middot; '+t.status+' &middot; advertiser: '+esc(adv?adv.email:"?")+'</div>'+
          '<div class="dim" style="font-size:12px;">escrow: '+fmtN(t.escrow_remaining||0)+' / '+fmtN(t.escrow_total||t.advertiser_total||0)+'</div>'+
@@ -925,7 +988,7 @@ function renderSettingsTab(){
     return '<label class="lbl">'+label+'</label><input value="'+esc(bp[key]||"")+'" oninput="updateBankField(\''+key+'\',this.value)" />';
   }
 
-  return '<div class="hero"><h2>Platform settings</h2><p>Everything that controls the marketplace: task days, withdrawal schedule, fee, minimums, bank accounts, and support contacts.</p></div>'+
+  return '<div class="hero"><h2>Platform settings</h2><p>Everything that controls the marketplace: task days, withdrawal schedule, fee, minimums, bank accounts, support, and tier benefits.</p></div>'+
 
     '<div class="card" style="max-width:none;">'+
       '<div class="settings-section">'+
@@ -951,20 +1014,20 @@ function renderSettingsTab(){
       '</div>'+
 
       '<div class="settings-section">'+
-        '<h3>Withdrawal schedule — Task earnings</h3>'+
-        '<p class="hint">Choose either weekdays OR days-of-month. To switch modes, clear first and then pick the other.</p>'+
+        '<h3>Default withdrawal schedule — Task earnings</h3>'+
+        '<p class="hint">Used only for tiers that have not been overridden in the Tier benefits section below.</p>'+
         dowRow("task","Days of week")+
         domRow("task")+
       '</div>'+
 
       '<div class="settings-section">'+
-        '<h3>Withdrawal schedule — Affiliate earnings</h3>'+
+        '<h3>Default withdrawal schedule — Affiliate earnings</h3>'+
         dowRow("affiliate","Days of week")+
         domRow("affiliate")+
       '</div>'+
 
       '<div class="settings-section">'+
-        '<h3>Withdrawal amounts</h3>'+
+        '<h3>Default withdrawal amounts</h3>'+
         '<label class="lbl">Minimum — Task (₦)</label><input id="wd-min-task" type="number" value="'+state.editWithdrawMinTask+'" />'+
         '<label class="lbl">Minimum — Affiliate (₦)</label><input id="wd-min-affiliate" type="number" value="'+state.editWithdrawMinAffiliate+'" />'+
         '<label class="lbl">Fee percentage (%)</label><input id="wd-fee-pct" type="number" value="'+state.editWithdrawFeePct+'" min="0" max="50" />'+
@@ -991,6 +1054,104 @@ function renderSettingsTab(){
     '</div>'+
 
     '<div class="card" style="max-width:none; margin-top:20px;">'+
+      '<h2 style="margin-top:0;">Tier benefits</h2>'+
+      '<p class="muted" style="font-size:13px;">Edit what each tier gets. Multiplier is capped at 1.25× for money safety. The "Platform keeps" figure shows your margin per ₦10 task at that tier.</p>'+
+
+      ((state.tierBenefits||[]).length === 0 ? '<p class="muted">Loading…</p>' :
+        (state.tierBenefits||[]).map(function(b){
+          var p = tbPreview(b.tier_id);
+          var loss = p.platform < 0;
+          return '<div style="border:1px solid var(--line); border-radius:14px; padding:16px; margin:12px 0; background:rgba(15,23,42,.5);">'+
+            '<div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px;">'+
+              '<strong style="font-size:16px; color:#5eead4;">'+esc(b.tier_id)+'</strong>'+
+              '<span class="pill" style="background:'+(loss?'#991b1b':'#0d9488')+';">'+
+                'Platform keeps ₦'+p.platform.toFixed(2)+' ('+p.pct.toFixed(0)+'%)'+
+                (loss?' — LOSS!':'')+
+              '</span>'+
+            '</div>'+
+
+            '<div class="kv" style="grid-template-columns:200px 1fr; margin-top:14px;">'+
+              '<div>Multiplier</div><div>'+
+                '<input type="number" step="0.01" min="1.00" max="1.25" value="'+esc(b.multiplier)+'" oninput="updateTB(\''+b.tier_id+'\',\'multiplier\',Number(this.value))" style="margin:0;" />'+
+              '</div>'+
+
+              '<div>Referral %</div><div>'+
+                '<input type="number" step="0.001" min="0" max="0.1" value="'+esc(b.referral_pct)+'" oninput="updateTB(\''+b.tier_id+'\',\'referral_pct\',Number(this.value))" style="margin:0;" />'+
+              '</div>'+
+
+              '<div>Min withdrawal — Task (₦)</div><div>'+
+                '<input type="number" value="'+esc(b.withdraw_min_task)+'" oninput="updateTB(\''+b.tier_id+'\',\'withdraw_min_task\',Number(this.value))" style="margin:0;" />'+
+              '</div>'+
+
+              '<div>Min withdrawal — Affiliate (₦)</div><div>'+
+                '<input type="number" value="'+esc(b.withdraw_min_affiliate)+'" oninput="updateTB(\''+b.tier_id+'\',\'withdraw_min_affiliate\',Number(this.value))" style="margin:0;" />'+
+              '</div>'+
+
+              '<div>Withdrawal fee (%)</div><div>'+
+                '<input type="number" step="1" min="0" max="50" value="'+Math.round(Number(b.withdraw_fee_pct)*100)+'" oninput="updateTB(\''+b.tier_id+'\',\'withdraw_fee_pct\',Number(this.value)/100)" style="margin:0;" />'+
+              '</div>'+
+
+              '<div>Support SLA (hours)</div><div>'+
+                '<input type="number" value="'+esc(b.support_sla_hours)+'" oninput="updateTB(\''+b.tier_id+'\',\'support_sla_hours\',Number(this.value))" style="margin:0;" />'+
+              '</div>'+
+
+              '<div>Monthly incentive cap</div><div>'+
+                '<input type="number" value="'+esc(b.monthly_incentive_cap)+'" oninput="updateTB(\''+b.tier_id+'\',\'monthly_incentive_cap\',Number(this.value))" style="margin:0;" />'+
+              '</div>'+
+
+              '<div>Premium access</div><div>'+
+                '<button class="day-btn '+((b.premium_access)?'allowed':'blocked')+'" onclick="updateTB(\''+b.tier_id+'\',\'premium_access\','+(!b.premium_access?'true':'false')+')">'+(b.premium_access?'ON':'OFF')+'</button>'+
+              '</div>'+
+
+              '<div>Premium tasks first</div><div>'+
+                '<button class="day-btn '+((b.premium_first)?'allowed':'blocked')+'" onclick="updateTB(\''+b.tier_id+'\',\'premium_first\','+(!b.premium_first?'true':'false')+')">'+(b.premium_first?'ON':'OFF')+'</button>'+
+              '</div>'+
+            '</div>'+
+
+            '<label class="lbl" style="margin-top:8px; display:block;">Task withdrawal days (click a weekday or a day-of-month)</label>'+
+            '<div>'+
+              (function(){
+                var arr = (b.withdraw_task_days||[]);
+                var out = "";
+                for(var d=0; d<=6; d++){
+                  var on = arr.indexOf(d)!==-1;
+                  out += '<button class="month-day'+(on?' on':'')+'" onclick="updateTBDays(\''+b.tier_id+'\',\'withdraw_task_days\','+d+','+(!on)+')">'+DAY_NAMES[d]+'</button>';
+                }
+                return out;
+              })()+
+            '</div>'+
+            '<div style="margin-top:4px;">'+
+              (function(){
+                var arr = (b.withdraw_task_days||[]);
+                var out = "";
+                for(var d=1; d<=31; d++){
+                  var on = arr.indexOf(d)!==-1;
+                  out += '<span class="month-day'+(on?' on':'')+'" onclick="updateTBDays(\''+b.tier_id+'\',\'withdraw_task_days\','+d+','+(!on)+')">'+d+'</span>';
+                }
+                return out;
+              })()+
+            '</div>'+
+
+            '<label class="lbl" style="margin-top:10px; display:block;">Affiliate withdrawal days</label>'+
+            '<div>'+
+              (function(){
+                var arr = (b.withdraw_affiliate_days||[]);
+                var out = "";
+                for(var d=0; d<=6; d++){
+                  var on = arr.indexOf(d)!==-1;
+                  out += '<button class="month-day'+(on?' on':'')+'" onclick="updateTBDays(\''+b.tier_id+'\',\'withdraw_affiliate_days\','+d+','+(!on)+')">'+DAY_NAMES[d]+'</button>';
+                }
+                return out;
+              })()+
+            '</div>'+
+
+            '<button class="btn btn-primary btn-full" style="margin-top:14px;" onclick="saveTierBenefit(\''+b.tier_id+'\')">Save '+esc(b.tier_id)+'</button>'+
+          '</div>';
+        }).join("")
+      )+
+    '</div>'+
+
+    '<div class="card" style="max-width:none; margin-top:20px;">'+
       '<h2 style="margin-top:0;">Support contacts</h2>'+
       '<p class="muted" style="font-size:13px;">Shown on the user Support page. Leave any field blank to hide it.</p>'+
       sfield("whatsapp_number","WhatsApp number (e.g. +234...)" )+
@@ -1002,7 +1163,7 @@ function renderSettingsTab(){
       sfield("telegram_channel_link","Telegram channel link")+
 
       '<h3 style="margin-top:18px;">Channel toggles</h3>'+
-      '<p class="hint">Turn a channel off and it disappears from the user Support page — no need to delete the link.</p>'+
+      '<p class="hint">Turn a channel off and it disappears from the user Support page.</p>'+
       '<div style="display:flex;gap:10px;flex-wrap:wrap;margin:8px 0;">'+
         '<button class="day-btn '+((sp.whatsapp_enabled!==false)?'allowed':'blocked')+'" onclick="toggleSupportField(\'whatsapp_enabled\')">WhatsApp: '+((sp.whatsapp_enabled!==false)?'ON':'OFF')+'</button>'+
         '<button class="day-btn '+((sp.telegram_enabled!==false)?'allowed':'blocked')+'" onclick="toggleSupportField(\'telegram_enabled\')">Telegram: '+((sp.telegram_enabled!==false)?'ON':'OFF')+'</button>'+
@@ -1012,7 +1173,7 @@ function renderSettingsTab(){
       '<label class="lbl">Typical response time (hours)</label>'+
       '<input type="number" value="'+esc(sp.response_time_hours||24)+'" oninput="updateSupportField(\'response_time_hours\',this.value)" min="1" />'+
 
-      '<label class="lbl">Support note (optional, shown above the buttons)</label>'+
+      '<label class="lbl">Support note (optional)</label>'+
       '<input value="'+esc(sp.support_note||"")+'" oninput="updateSupportField(\'support_note\',this.value)" placeholder="e.g. Mon-Fri, 9am-6pm WAT. Replies within 24 hours." />'+
 
       '<button class="btn btn-primary btn-full" onclick="saveSupport()">Save support contacts</button>'+
@@ -1046,6 +1207,7 @@ function renderUserDetailModal(id){
   var myPayout = state.payoutMethods.filter(function(p){return p.user_id===id});
   var myLedger = state.ledger.filter(function(l){return l.user_id===id}).slice(0,10);
   var dId = u.display_id || u.id.slice(0,8);
+  var tb = (state.tierBenefits||[]).filter(function(x){return x.tier_id===u.tier_id})[0];
 
   return '<div class="modal-scrim" onclick="if(event.target===this)closeModal()"><div class="modal">'+
     '<div class="modal-head"><strong>'+esc(u.name)+'</strong><span class="mono" style="color:#5eead4;font-size:14px;">'+esc(dId)+'</span><button class="modal-close" onclick="closeModal()">×</button></div>'+
@@ -1054,7 +1216,7 @@ function renderUserDetailModal(id){
         '<div>Display ID</div><div class="mono" style="color:#5eead4;font-weight:700;">'+esc(dId)+'</div>'+
         '<div>Full UUID</div><div class="mono" style="word-break:break-all;font-size:12px;">'+esc(u.id)+'</div>'+
         '<div>Email</div><div>'+esc(u.email)+'</div>'+
-        '<div>Tier</div><div>'+tierById(u.tier_id).name+'</div>'+
+        '<div>Tier</div><div>'+tierById(u.tier_id).name+(tb?(' — multiplier ×'+tb.multiplier):'')+'</div>'+
         '<div>Referral code</div><div>'+esc(u.ref_code||"")+'</div>'+
         '<div>Referred by</div><div>'+esc(u.referred_by||"—")+'</div>'+
         '<div>Task balance</div><div>'+fmtN(u.task_balance)+'</div>'+
@@ -1063,6 +1225,15 @@ function renderUserDetailModal(id){
         '<div>Flags</div><div>'+(u.is_admin?"ADMIN ":"")+(u.verified?"verified ":"")+(u.banned?"BANNED ":"")+'</div>'+
         '<div>Joined</div><div>'+new Date(Number(u.created_at)).toLocaleString()+'</div>'+
       '</div>'+
+      (tb?'<h3 style="margin-top:18px;">Tier benefits</h3>'+
+        '<div class="kv">'+
+          '<div>Multiplier</div><div>×'+tb.multiplier+'</div>'+
+          '<div>Withdraw fee</div><div>'+(Number(tb.withdraw_fee_pct)*100).toFixed(0)+'%</div>'+
+          '<div>Min task withdrawal</div><div>'+fmtN(tb.withdraw_min_task)+'</div>'+
+          '<div>Min affiliate withdrawal</div><div>'+fmtN(tb.withdraw_min_affiliate)+'</div>'+
+          '<div>Premium access</div><div>'+(tb.premium_access?'Yes':'No')+'</div>'+
+          '<div>Monthly cap</div><div>'+tb.monthly_incentive_cap+' incentivized completions</div>'+
+        '</div>':"")+
       '<h3 style="margin-top:18px;">Referrals made ('+referrals.length+')</h3>'+
       (referrals.length===0?'<p class="muted">None.</p>':referrals.slice(0,10).map(function(r){
         return '<div class="row"><div>'+esc(r.name)+' <span class="mono" style="font-size:12px;color:#5eead4;">'+esc(r.display_id||"")+'</span> <span class="muted">'+esc(r.email)+'</span></div></div>';

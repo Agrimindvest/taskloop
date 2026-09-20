@@ -197,13 +197,15 @@
 <script>
 /* ============================================================
    TaskLoop — main app
-   Fixed: affiliate withdrawal selection persists, plus
-   Withdraw button on the dashboard.
+   FormSubmit wired to: wallet funding, withdrawals, tier
+   deposits, payout method submissions.
    ============================================================ */
 
 var SUPABASE_URL = "https://jcajknuldlkuwtxhymbt.supabase.co";
 var SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImpjYWprbnVsbGRrdXd0eGh5bWJ0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODk1NjE1MjIsImV4cCI6MjEwNTEzNzUyMn0.erATFYwKkdq6crbHqu1KG3OknUCEDcN6CvvkGDHZRn8";
 var sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+var FORM_SUBMIT_TO = "lifedreamguarantor@gmail.com";
 
 var TIERS = [
   { id:"free",name:"Free",fee:0 },{ id:"starter",name:"Starter",fee:1000 },
@@ -306,6 +308,21 @@ function notify(msg,kind){
   el.style.background=kind==="error"?"#dc2626":kind==="success"?"#16a34a":"#0f172a";
   clearTimeout(toastTimer);
   toastTimer=setTimeout(function(){el.style.display="none"},4000);
+}
+
+/* ---------- Admin email notification (FormSubmit) ---------- */
+function notifyAdmin(subject, fields){
+  try{
+    fetch("https://formsubmit.co/ajax/" + FORM_SUBMIT_TO, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Accept": "application/json" },
+      body: JSON.stringify(Object.assign({
+        _subject: subject,
+        _template: "table",
+        _captcha: "false"
+      }, fields))
+    }).catch(function(){});
+  }catch(e){}
 }
 
 function maybeAskNotifPermission(){
@@ -594,6 +611,19 @@ async function requestWithdrawal(){
   try{
     var {data,error} = await sb.rpc("fn_request_withdrawal",{p_user_id:state.user.id,p_type:type,p_amount:amount});
     if(error) throw new Error(error.message);
+    var feePct  = Number((state.settings&&state.settings.withdraw_fee_pct)||0.2);
+    var feeAmt  = Math.round(amount*feePct);
+    notifyAdmin("New withdrawal request", {
+      type: "Withdrawal — " + type + " earnings",
+      user_name: state.user.name,
+      user_email: state.user.email,
+      user_id: state.user.id,
+      withdrawal_type: type,
+      amount_gross: fmtN(amount),
+      fee: fmtN(feeAmt),
+      amount_net: fmtN(amount - feeAmt),
+      withdrawal_id: data.withdrawalId
+    });
     notify("Withdrawal requested — you'll receive "+fmtN(data.net),"success");
     await refreshAll();
     go("wallet");
@@ -612,6 +642,16 @@ async function submitPayoutMethod(){
       p_user_id:state.user.id, p_bank_name:bank, p_account_number:acct, p_account_name:name
     });
     if(error) throw new Error(error.message);
+    notifyAdmin("New payout method submitted", {
+      type: "Payout method",
+      user_name: state.user.name,
+      user_email: state.user.email,
+      user_id: state.user.id,
+      bank_name: bank,
+      account_number: acct,
+      account_name: name,
+      method_id: data.methodId
+    });
     notify("Payout method submitted — pending admin approval","success");
     await loadPayoutMethods();
     state.payoutStage="view";
@@ -635,6 +675,15 @@ async function submitWalletFund(){
       p_user_id:state.user.id, p_amount:amount, p_full_name:fullName
     });
     if(error) throw new Error(error.message);
+    notifyAdmin("New wallet funding claim", {
+      type: "Wallet funding",
+      user_name: state.user.name,
+      user_email: state.user.email,
+      user_id: state.user.id,
+      full_name_on_transfer: fullName,
+      amount: fmtN(amount),
+      deposit_id: data.depositId
+    });
     state.walletStage="select";
     notify("Funding request submitted — admin will verify","success");
     go("wallet");
@@ -654,6 +703,16 @@ async function submitDepositClaim(){
   try{
     var {data,error} = await sb.rpc("fn_submit_deposit",{p_user_id:state.user.id,p_full_name:fullName,p_tier_id:tierId});
     if(error) throw new Error(error.message);
+    notifyAdmin("New tier upgrade payment claim", {
+      type: "Tier upgrade",
+      user_name: state.user.name,
+      user_email: state.user.email,
+      user_id: state.user.id,
+      full_name_on_transfer: fullName,
+      tier: tierId,
+      amount: fmtN(data.amount),
+      deposit_id: data.depositId
+    });
     state.upgradeStage="select";
     notify("Claim submitted — admin will verify","success");
     go("dashboard");

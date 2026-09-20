@@ -118,8 +118,9 @@
   .modal-body{padding:22px}
   .modal-foot{padding:16px 22px;border-top:1px solid var(--line);display:flex;justify-content:flex-end;gap:8px}
   .modal-close{background:transparent;border:none;color:var(--muted);font-size:22px;cursor:pointer;line-height:1}
-  .kv{display:grid;grid-template-columns:160px 1fr;gap:10px 16px;margin-bottom:14px;font-size:14px}
+  .kv{display:grid;grid-template-columns:180px 1fr;gap:10px 16px;margin-bottom:14px;font-size:14px}
   .kv > div:nth-child(odd){color:var(--muted)}
+  .mono{font-family:ui-monospace,Menlo,Consolas,monospace}
   .tabs{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:18px}
   .tab{padding:9px 14px;border-radius:10px;border:1px solid var(--line);background:rgba(30,41,59,.6);color:#cbd5e1;
     font-size:13.5px;font-weight:600;cursor:pointer;transition:all .12s ease}
@@ -172,7 +173,9 @@
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script>
 /* ============================================================
-   TaskLoop — admin portal (final, with bank editing)
+   TaskLoop — admin portal
+   Includes: full payout bank details, FormSubmit notifications,
+   display IDs, settings, broadcast, audit.
    ============================================================ */
 
 var SUPABASE_URL = "https://jcajknuldlkuwtxhymbt.supabase.co";
@@ -213,11 +216,9 @@ var state = {
   editWithdrawMinAffiliate: 1000,
   editWithdrawFeePct: 20,
   editSupport: {},
+  editBanks: {},
   broadcastMode: "all",
-  broadcastTargetEmail: "",
-  broadcastKind: "broadcast",
-  broadcastTitle: "",
-  broadcastBody: ""
+  broadcastKind: "broadcast"
 };
 
 var toastTimer=null;
@@ -376,12 +377,9 @@ function rejectPayoutMethod(id){
 function editPayoutMethod(id){
   var m=state.payoutMethods.filter(function(x){return x.id===id})[0];
   if(!m) return;
-  var bank=prompt("Bank name:", m.bank_name);
-  if(bank===null) return;
-  var acct=prompt("Account number:", m.account_number);
-  if(acct===null) return;
-  var name=prompt("Account name:", m.account_name);
-  if(name===null) return;
+  var bank=prompt("Bank name:", m.bank_name); if(bank===null) return;
+  var acct=prompt("Account number:", m.account_number); if(acct===null) return;
+  var name=prompt("Account name:", m.account_name); if(name===null) return;
   callAdmin("fn_admin_edit_payout_method",{p_method_id:id,p_bank_name:bank,p_account_number:acct,p_account_name:name},"Payout method updated");
 }
 function runSweep(){ callAdmin("fn_admin_sweep_pending",{},"Sweep complete") }
@@ -449,6 +447,14 @@ function loadSettingsIntoEditor(){
     state.editWithdrawMinTask = Number(state.settings.withdraw_min_task||10000);
     state.editWithdrawMinAffiliate = Number(state.settings.withdraw_min_affiliate||1000);
     state.editWithdrawFeePct = Math.round(Number(state.settings.withdraw_fee_pct||0.2)*100);
+    state.editBanks = {
+      wallet_bank_number: state.settings.wallet_bank_number || "",
+      wallet_bank_name:   state.settings.wallet_bank_name   || "",
+      wallet_bank_label:  state.settings.wallet_bank_label  || "",
+      tier_bank_number:   state.settings.tier_bank_number   || "",
+      tier_bank_name:     state.settings.tier_bank_name     || "",
+      tier_bank_label:    state.settings.tier_bank_label    || ""
+    };
   }
   if(state.support){
     state.editSupport = Object.assign({}, state.support);
@@ -514,30 +520,21 @@ function saveSupport(){
     p_support_email: s.support_email||null
   },"Support contacts saved");
 }
-function updateSupportField(k, v){
-  state.editSupport[k]=v;
-}
+function updateSupportField(k, v){ state.editSupport[k]=v; }
 
-/* ---------- BANK ACCOUNTS ---------- */
+function updateBankField(k, v){ state.editBanks[k]=v; }
 function saveBanks(){
-  var wnum = document.getElementById("pb-wallet-number").value.trim();
-  var wname = document.getElementById("pb-wallet-name").value.trim();
-  var wlabel = document.getElementById("pb-wallet-label").value.trim();
-  var tnum = document.getElementById("pb-tier-number").value.trim();
-  var tname = document.getElementById("pb-tier-name").value.trim();
-  var tlabel = document.getElementById("pb-tier-label").value.trim();
-  if(!wnum||!wname||!wlabel||!tnum||!tname||!tlabel){notify("Fill in all six fields","error");return}
+  var b=state.editBanks;
   callAdmin("fn_admin_update_banks",{
-    p_wallet_number: wnum,
-    p_wallet_name: wname,
-    p_wallet_label: wlabel,
-    p_tier_number: tnum,
-    p_tier_name: tname,
-    p_tier_label: tlabel
+    p_wallet_number: b.wallet_bank_number||null,
+    p_wallet_name:   b.wallet_bank_name||null,
+    p_wallet_label:  b.wallet_bank_label||null,
+    p_tier_number:   b.tier_bank_number||null,
+    p_tier_name:     b.tier_bank_name||null,
+    p_tier_label:    b.tier_bank_label||null
   },"Bank accounts saved");
 }
 
-/* ---------- BROADCAST ---------- */
 function setBroadcastMode(m){ state.broadcastMode=m; render() }
 async function sendBroadcast(){
   var title=document.getElementById("bc-title").value.trim();
@@ -639,8 +636,9 @@ function renderSubmissionsTab(){
     var u=state.users.filter(function(x){return x.id===s.worker_id})[0];
     var t=state.tasks.filter(function(x){return x.id===s.task_id})[0];
     var color=s.status==="approved"?"#16a34a":s.status==="rejected"?"#dc2626":"#d97706";
+    var dId = u && u.display_id ? u.display_id : (u ? u.id.slice(0,8) : "?");
     return '<div class="row"><div>'+
-      '<strong>'+esc(u?u.name:"?")+'</strong> — '+(t?t.category:"?")+' — '+fmtN(s.payout)+
+      '<strong>'+esc(u?u.name:"?")+'</strong> <span class="mono muted" style="font-size:12px;">'+esc(dId)+'</span> — '+(t?t.category:"?")+' — '+fmtN(s.payout)+
       '<div class="dim" style="font-size:12px;">elapsed '+(Number(s.elapsed_ms)/1000).toFixed(2)+'s &middot; '+new Date(Number(s.submitted_at)).toLocaleString()+' &middot; <span class="pill" style="background:'+color+';">'+s.status+'</span></div>'+
       (s.reason?'<div class="dim" style="font-size:12px;">'+esc(s.reason)+'</div>':"")+
     '</div>'+
@@ -681,13 +679,17 @@ function renderUsersTab(){
   var q=state.search.toLowerCase();
   var filtered=state.users.filter(function(u){
     if(!q) return true;
-    return (u.name||"").toLowerCase().indexOf(q)!==-1 || (u.email||"").toLowerCase().indexOf(q)!==-1 || (u.ref_code||"").toLowerCase().indexOf(q)!==-1;
+    return (u.name||"").toLowerCase().indexOf(q)!==-1
+        || (u.email||"").toLowerCase().indexOf(q)!==-1
+        || (u.ref_code||"").toLowerCase().indexOf(q)!==-1
+        || (u.display_id||"").toLowerCase().indexOf(q)!==-1;
   });
-  return '<div class="search-box"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg><input id="user-search" placeholder="Search users" value="'+esc(state.search)+'" /></div>'+
+  return '<div class="search-box"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg><input id="user-search" placeholder="Search by name, email, ID or referral code" value="'+esc(state.search)+'" /></div>'+
     '<div class="muted" style="margin-bottom:8px;font-size:13px;">Showing '+filtered.length+' of '+state.users.length+'</div>'+
     (filtered.map(function(u){
+      var dId = u.display_id || u.id.slice(0,8);
       return '<div class="row"><div onclick="openUserDetail(\''+u.id+'\')" style="cursor:pointer;flex:1;">'+
-        '<strong>'+esc(u.name)+'</strong> <span class="muted">'+esc(u.email)+'</span>'+
+        '<strong>'+esc(u.name)+'</strong> <span class="mono" style="font-size:12px;color:#5eead4;">'+esc(dId)+'</span> <span class="muted">'+esc(u.email)+'</span>'+
         '<div class="dim" style="font-size:12px;">tier: '+tierById(u.tier_id).name+' &middot; task '+fmtN(u.task_balance)+' &middot; adv '+fmtN(u.advertiser_balance)+' &middot; affil '+fmtN(u.affiliate_balance)+'</div>'+
         '<div class="dim" style="font-size:12px;">'+(u.is_admin?"ADMIN ":"")+(u.verified?"verified ":"")+(u.banned?"BANNED ":"")+'ref: '+esc(u.ref_code||"")+'</div>'+
       '</div><div style="display:flex;gap:6px;flex-wrap:wrap;">'+
@@ -709,23 +711,39 @@ function renderFinanceTab(){
   function walletRow(w,isPending){
     var u=state.users.filter(function(x){return x.id===w.user_id})[0];
     var color=w.status==="pending"?"#d97706":w.status==="approved"?"#16a34a":"#dc2626";
-    return '<div class="row"><div><strong>'+esc(w.full_name)+'</strong> — '+fmtN(w.amount)+
+    var dId = u && u.display_id ? u.display_id : "?";
+    return '<div class="row"><div><strong>'+esc(w.full_name)+'</strong> <span class="mono" style="font-size:12px;color:#5eead4;">'+esc(dId)+'</span> — '+fmtN(w.amount)+
       '<div class="dim" style="font-size:12px;">user: '+(u?esc(u.email):"?")+' &middot; '+new Date(Number(w.ts)).toLocaleString()+' &middot; <span class="pill" style="background:'+color+';">'+w.status+'</span></div></div>'+
       (isPending?'<div style="display:flex;gap:6px;"><button class="btn btn-sm btn-primary" onclick="approveWalletFund(\''+w.id+'\')">Approve</button><button class="btn btn-sm btn-danger" onclick="rejectWalletFund(\''+w.id+'\')">Reject</button></div>':"")+
     '</div>';
   }
+
   function payoutRow(p,isPending){
     var u=state.users.filter(function(x){return x.id===p.user_id})[0];
     var color=p.status==="pending"?"#d97706":p.status==="approved"?"#16a34a":"#dc2626";
-    return '<div class="row"><div><strong>'+(u?esc(u.name):"?")+'</strong> — '+esc(p.bank_name)+' ••••'+esc(p.account_number.slice(-4))+
-      '<div class="dim" style="font-size:12px;">name: '+esc(p.account_name)+' &middot; email: '+(u?esc(u.email):"?")+' &middot; '+new Date(Number(p.ts)).toLocaleString()+' &middot; <span class="pill" style="background:'+color+';">'+p.status+'</span></div>'+
+    var dId = u && u.display_id ? u.display_id : "?";
+    return '<div class="row" style="flex-direction:column;align-items:stretch;">'+
+      '<div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px;">'+
+        '<div>'+
+          '<strong>'+esc(u?u.name:"?")+'</strong> <span class="mono" style="font-size:12px;color:#5eead4;">'+esc(dId)+'</span>'+
+          '<div class="dim" style="font-size:12px;">'+new Date(Number(p.ts)).toLocaleString()+'</div>'+
+        '</div>'+
+        '<span class="pill" style="background:'+color+';">'+p.status+'</span>'+
+      '</div>'+
+      '<div class="kv" style="margin-top:10px;grid-template-columns:140px 1fr;">'+
+        '<div>Bank name</div><div><strong>'+esc(p.bank_name)+'</strong></div>'+
+        '<div>Account number</div><div class="mono" style="font-weight:700;letter-spacing:1px;">'+esc(p.account_number)+'</div>'+
+        '<div>Account name</div><div><strong>'+esc(p.account_name)+'</strong></div>'+
+        '<div>User email</div><div>'+(u?esc(u.email):"?")+'</div>'+
+        '<div>User ID</div><div class="mono" style="font-size:12px;">'+esc(u?u.id:"?")+'</div>'+
+      '</div>'+
       (p.admin_note?'<div class="dim" style="font-size:12px;">note: '+esc(p.admin_note)+'</div>':"")+
-    '</div>'+
-    (isPending?'<div style="display:flex;gap:6px;flex-wrap:wrap;">'+
-      '<button class="btn btn-sm btn-primary" onclick="approvePayoutMethod(\''+p.id+'\')">Approve</button>'+
-      '<button class="btn btn-sm btn-ghost" onclick="editPayoutMethod(\''+p.id+'\')">Edit</button>'+
-      '<button class="btn btn-sm btn-danger" onclick="rejectPayoutMethod(\''+p.id+'\')">Reject</button>'+
-    '</div>':"")+'</div>';
+      (isPending?'<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:10px;">'+
+        '<button class="btn btn-sm btn-primary" onclick="approvePayoutMethod(\''+p.id+'\')">Approve</button>'+
+        '<button class="btn btn-sm btn-ghost" onclick="editPayoutMethod(\''+p.id+'\')">Edit</button>'+
+        '<button class="btn btn-sm btn-danger" onclick="rejectPayoutMethod(\''+p.id+'\')">Reject</button>'+
+      '</div>':"")+
+    '</div>';
   }
 
   return '<div class="stats-row" style="margin-bottom:20px;">'+
@@ -739,6 +757,7 @@ function renderFinanceTab(){
     (walletRest.length?'<h3 style="margin-top:18px;">Recent wallet fundings</h3>'+walletRest.map(function(w){return walletRow(w,false)}).join(""):"")+
 
     '<h3 style="margin-top:22px;">Payout methods — pending ('+payoutPending.length+')</h3>'+
+    '<p class="muted" style="font-size:12px;">Full bank details are shown below for manual payment processing.</p>'+
     (payoutPending.length===0?'<p class="muted">None pending.</p>':payoutPending.map(function(p){return payoutRow(p,true)}).join(""))+
     (payoutRest.length?'<h3 style="margin-top:18px;">Recent payout methods</h3>'+payoutRest.map(function(p){return payoutRow(p,false)}).join(""):"")+
 
@@ -747,7 +766,8 @@ function renderFinanceTab(){
      state.deposits.map(function(d){
        var u=state.users.filter(function(x){return x.id===d.user_id})[0];
        var color=d.status==="pending"?"#d97706":d.status==="approved"?"#16a34a":"#dc2626";
-       return '<div class="row"><div><strong>'+esc(d.full_name)+'</strong> — '+tierById(d.tier_id).name+' — '+fmtN(d.amount)+
+       var dId = u && u.display_id ? u.display_id : "?";
+       return '<div class="row"><div><strong>'+esc(d.full_name)+'</strong> <span class="mono" style="font-size:12px;color:#5eead4;">'+esc(dId)+'</span> — '+tierById(d.tier_id).name+' — '+fmtN(d.amount)+
          '<div class="dim" style="font-size:12px;">user: '+(u?esc(u.email):"?")+' &middot; '+new Date(Number(d.ts)).toLocaleString()+'</div></div>'+
          '<div style="display:flex;gap:6px;align-items:center;"><span class="pill" style="background:'+color+';">'+d.status+'</span>'+
          (d.status==="pending"?'<button class="btn btn-sm btn-primary" onclick="approveDeposit(\''+d.id+'\')">Approve</button><button class="btn btn-sm btn-danger" onclick="rejectDeposit(\''+d.id+'\')">Reject</button>':"")+
@@ -760,11 +780,24 @@ function renderFinanceTab(){
        var u=state.users.filter(function(x){return x.id===w.user_id})[0];
        var pm=state.payoutMethods.filter(function(p){return p.user_id===w.user_id && p.status==="approved"})[0];
        var color=w.status==="pending"?"#d97706":w.status==="approved"?"#16a34a":"#dc2626";
-       return '<div class="row"><div><strong>'+(u?esc(u.name):"?")+'</strong> — '+w.type+' — gross '+fmtN(w.amount)+' — fee '+fmtN(w.fee)+' — net '+fmtN(w.net)+
-         '<div class="dim" style="font-size:12px;">'+new Date(Number(w.ts)).toLocaleString()+(pm?' &middot; pay to: '+esc(pm.bank_name)+' ••••'+esc(pm.account_number.slice(-4)):'')+'</div></div>'+
-         '<div style="display:flex;gap:6px;align-items:center;"><span class="pill" style="background:'+color+';">'+w.status+'</span>'+
-         (w.status==="pending"?'<button class="btn btn-sm btn-primary" onclick="approveWithdrawal(\''+w.id+'\')">Mark paid</button><button class="btn btn-sm btn-danger" onclick="rejectWithdrawal(\''+w.id+'\')">Reject</button>':"")+
-         '</div></div>';
+       var dId = u && u.display_id ? u.display_id : "?";
+       var payDetails = pm
+         ? '<div class="kv" style="margin-top:10px;grid-template-columns:140px 1fr;">'+
+             '<div>Bank name</div><div><strong>'+esc(pm.bank_name)+'</strong></div>'+
+             '<div>Account number</div><div class="mono" style="font-weight:700;letter-spacing:1px;">'+esc(pm.account_number)+'</div>'+
+             '<div>Account name</div><div><strong>'+esc(pm.account_name)+'</strong></div>'+
+           '</div>'
+         : '<div class="dim" style="font-size:12px;margin-top:6px;">No approved payout method on file.</div>';
+       return '<div class="row" style="flex-direction:column;align-items:stretch;">'+
+         '<div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px;">'+
+           '<div><strong>'+(u?esc(u.name):"?")+'</strong> <span class="mono" style="font-size:12px;color:#5eead4;">'+esc(dId)+'</span>'+
+             '<div class="dim" style="font-size:12px;">'+w.type+' &middot; gross '+fmtN(w.amount)+' &middot; fee '+fmtN(w.fee)+' &middot; net '+fmtN(w.net)+' &middot; '+new Date(Number(w.ts)).toLocaleString()+'</div>'+
+           '</div>'+
+           '<span class="pill" style="background:'+color+';">'+w.status+'</span>'+
+         '</div>'+
+         payDetails+
+         (w.status==="pending"?'<div style="display:flex;gap:6px;margin-top:10px;"><button class="btn btn-sm btn-primary" onclick="approveWithdrawal(\''+w.id+'\')">Mark paid</button><button class="btn btn-sm btn-danger" onclick="rejectWithdrawal(\''+w.id+'\')">Reject</button></div>':"")+
+       '</div>';
      }).join(""));
 }
 
@@ -778,7 +811,7 @@ function renderBroadcastTab(){
       '<option value="all"'+(mode==="all"?" selected":"")+'>Everyone ('+state.users.length+' users)</option>'+
       '<option value="one"'+(mode==="one"?" selected":"")+'>One specific user</option>'+
     '</select>'+
-    (mode==="one"?'<label class="lbl">User email</label><input id="bc-email" placeholder="user@example.com" value="'+esc(state.broadcastTargetEmail||"")+'" />':"")+
+    (mode==="one"?'<label class="lbl">User email</label><input id="bc-email" placeholder="user@example.com" />':"")+
     '<label class="lbl">Kind</label>'+
     '<select id="bc-kind">'+
       ['broadcast','info','success','warning','money'].map(function(k){
@@ -866,21 +899,26 @@ function renderSettingsTab(){
   }
 
   var sp = state.editSupport||{};
+  var bp = state.editBanks||{};
   function sfield(key,label){
     return '<label class="lbl">'+label+'</label><input value="'+esc(sp[key]||"")+'" oninput="updateSupportField(\''+key+'\',this.value)" />';
   }
+  function bfield(key,label){
+    return '<label class="lbl">'+label+'</label><input value="'+esc(bp[key]||"")+'" oninput="updateBankField(\''+key+'\',this.value)" />';
+  }
 
-  return '<div class="hero"><h2>Platform settings</h2><p>Task days, withdrawal schedule, fee, minimums, support contacts, and bank accounts.</p></div>'+
+  return '<div class="hero"><h2>Platform settings</h2><p>Everything that controls the marketplace: task days, withdrawal schedule, fee, minimums, bank accounts, and support contacts.</p></div>'+
 
     '<div class="card" style="max-width:none;">'+
       '<div class="settings-section">'+
         '<h3>Task availability — blocked days of the week</h3>'+
-        '<p class="hint">Red days are paused. Server enforces this.</p>'+
+        '<p class="hint">Red days are paused. Server enforces this — cannot be bypassed from the browser.</p>'+
         '<div class="day-toggle">'+daysHtml+'</div>'+
       '</div>'+
 
       '<div class="settings-section">'+
         '<h3>Blackout dates (specific)</h3>'+
+        '<p class="hint">One-off dates when tasks are paused.</p>'+
         '<div style="margin-bottom:12px;">'+datesHtml+'</div>'+
         '<div style="display:flex;gap:8px;align-items:flex-end;">'+
           '<div style="flex:1;"><label class="lbl">Add a blackout date</label><input id="new-blocked-date" type="date" /></div>'+
@@ -896,7 +934,7 @@ function renderSettingsTab(){
 
       '<div class="settings-section">'+
         '<h3>Withdrawal schedule — Task earnings</h3>'+
-        '<p class="hint">Choose either weekdays OR days-of-month. To switch modes, clear first.</p>'+
+        '<p class="hint">Choose either weekdays OR days-of-month. To switch modes, clear first and then pick the other.</p>'+
         dowRow("task","Days of week")+
         domRow("task")+
       '</div>'+
@@ -918,6 +956,23 @@ function renderSettingsTab(){
     '</div>'+
 
     '<div class="card" style="max-width:none; margin-top:20px;">'+
+      '<h2 style="margin-top:0;">Platform bank accounts</h2>'+
+      '<p class="muted" style="font-size:13px;">These are the accounts users see when funding their wallet or paying for a tier upgrade. Changing them updates the user side immediately.</p>'+
+
+      '<h3 style="margin-top:18px;">Wallet funding account</h3>'+
+      bfield("wallet_bank_number","Account number")+
+      bfield("wallet_bank_name","Account name")+
+      bfield("wallet_bank_label","Bank label")+
+
+      '<h3 style="margin-top:22px;">Tier upgrade account</h3>'+
+      bfield("tier_bank_number","Account number")+
+      bfield("tier_bank_name","Account name")+
+      bfield("tier_bank_label","Bank label")+
+
+      '<button class="btn btn-primary btn-full" onclick="saveBanks()">Save bank accounts</button>'+
+    '</div>'+
+
+    '<div class="card" style="max-width:none; margin-top:20px;">'+
       '<h2 style="margin-top:0;">Support contacts</h2>'+
       '<p class="muted" style="font-size:13px;">Shown on the user Support page. Leave any field blank to hide it.</p>'+
       sfield("whatsapp_number","WhatsApp number (e.g. +234...)" )+
@@ -928,25 +983,6 @@ function renderSettingsTab(){
       sfield("whatsapp_channel_link","WhatsApp channel link")+
       sfield("telegram_channel_link","Telegram channel link")+
       '<button class="btn btn-primary btn-full" onclick="saveSupport()">Save support contacts</button>'+
-    '</div>'+
-
-    '<div class="card" style="max-width:none; margin-top:20px;">'+
-      '<h2 style="margin-top:0;">Platform bank accounts</h2>'+
-      '<p class="muted" style="font-size:13px;">These are the accounts users see when funding their wallet or upgrading tier. Two separate accounts so bank reconciliation is easy.</p>'+
-
-      '<h3 style="margin-top:16px;">Wallet funding bank</h3>'+
-      '<p class="muted" style="font-size:12px;">Shown when a user clicks "Fund wallet" to pay for tasks.</p>'+
-      '<label class="lbl">Account number</label><input id="pb-wallet-number" value="'+esc(state.settings.wallet_bank_number||"")+'" />'+
-      '<label class="lbl">Account name</label><input id="pb-wallet-name" value="'+esc(state.settings.wallet_bank_name||"")+'" />'+
-      '<label class="lbl">Bank name</label><input id="pb-wallet-label" value="'+esc(state.settings.wallet_bank_label||"")+'" />'+
-
-      '<h3 style="margin-top:22px;">Tier upgrade bank</h3>'+
-      '<p class="muted" style="font-size:12px;">Shown when a user clicks "Upgrade tier".</p>'+
-      '<label class="lbl">Account number</label><input id="pb-tier-number" value="'+esc(state.settings.tier_bank_number||"")+'" />'+
-      '<label class="lbl">Account name</label><input id="pb-tier-name" value="'+esc(state.settings.tier_bank_name||"")+'" />'+
-      '<label class="lbl">Bank name</label><input id="pb-tier-label" value="'+esc(state.settings.tier_bank_label||"")+'" />'+
-
-      '<button class="btn btn-primary btn-full" onclick="saveBanks()">Save bank accounts</button>'+
     '</div>';
 }
 
@@ -976,12 +1012,14 @@ function renderUserDetailModal(id){
   var myWithdrawals = state.withdrawals.filter(function(w){return w.user_id===id});
   var myPayout = state.payoutMethods.filter(function(p){return p.user_id===id});
   var myLedger = state.ledger.filter(function(l){return l.user_id===id}).slice(0,10);
+  var dId = u.display_id || u.id.slice(0,8);
 
   return '<div class="modal-scrim" onclick="if(event.target===this)closeModal()"><div class="modal">'+
-    '<div class="modal-head"><strong>'+esc(u.name)+'</strong><button class="modal-close" onclick="closeModal()">×</button></div>'+
+    '<div class="modal-head"><strong>'+esc(u.name)+'</strong><span class="mono" style="color:#5eead4;font-size:14px;">'+esc(dId)+'</span><button class="modal-close" onclick="closeModal()">×</button></div>'+
     '<div class="modal-body">'+
       '<div class="kv">'+
-        '<div>User ID</div><div style="word-break:break-all;">'+esc(u.id)+'</div>'+
+        '<div>Display ID</div><div class="mono" style="color:#5eead4;font-weight:700;">'+esc(dId)+'</div>'+
+        '<div>Full UUID</div><div class="mono" style="word-break:break-all;font-size:12px;">'+esc(u.id)+'</div>'+
         '<div>Email</div><div>'+esc(u.email)+'</div>'+
         '<div>Tier</div><div>'+tierById(u.tier_id).name+'</div>'+
         '<div>Referral code</div><div>'+esc(u.ref_code||"")+'</div>'+
@@ -994,7 +1032,7 @@ function renderUserDetailModal(id){
       '</div>'+
       '<h3 style="margin-top:18px;">Referrals made ('+referrals.length+')</h3>'+
       (referrals.length===0?'<p class="muted">None.</p>':referrals.slice(0,10).map(function(r){
-        return '<div class="row"><div>'+esc(r.name)+' <span class="muted">'+esc(r.email)+'</span></div></div>';
+        return '<div class="row"><div>'+esc(r.name)+' <span class="mono" style="font-size:12px;color:#5eead4;">'+esc(r.display_id||"")+'</span> <span class="muted">'+esc(r.email)+'</span></div></div>';
       }).join(""))+
       '<h3 style="margin-top:18px;">Submissions ('+mySubs.length+')</h3>'+
       '<p class="muted" style="font-size:13px;">approved '+mySubs.filter(function(s){return s.status==="approved"}).length+
@@ -1011,7 +1049,11 @@ function renderUserDetailModal(id){
       '<h3 style="margin-top:18px;">Payout methods ('+myPayout.length+')</h3>'+
       (myPayout.length===0?'<p class="muted">None.</p>':myPayout.slice(0,5).map(function(p){
         var color=p.status==="pending"?"#d97706":p.status==="approved"?"#16a34a":"#dc2626";
-        return '<div class="row"><div>'+esc(p.bank_name)+' ••••'+esc(p.account_number.slice(-4))+'<div class="dim" style="font-size:12px;">'+esc(p.account_name)+'</div></div><span class="pill" style="background:'+color+';">'+p.status+'</span></div>';
+        return '<div class="row"><div>'+
+          '<strong>'+esc(p.bank_name)+'</strong>'+
+          '<div class="mono" style="font-size:13px;letter-spacing:1px;">'+esc(p.account_number)+'</div>'+
+          '<div class="dim" style="font-size:12px;">'+esc(p.account_name)+'</div>'+
+        '</div><span class="pill" style="background:'+color+';">'+p.status+'</span></div>';
       }).join(""))+
       '<h3 style="margin-top:18px;">Recent ledger</h3>'+
       (myLedger.length===0?'<p class="muted">None.</p>':myLedger.map(function(l){
@@ -1034,7 +1076,7 @@ function renderModal(){
     return '<div class="modal-scrim" onclick="if(event.target===this)closeModal()"><div class="modal">'+
       '<div class="modal-head"><strong>Edit user</strong><button class="modal-close" onclick="closeModal()">×</button></div>'+
       '<div class="modal-body">'+
-        '<div class="kv"><div>User ID</div><div style="word-break:break-all;">'+esc(u.id)+'</div></div>'+
+        '<div class="kv"><div>Display ID</div><div class="mono" style="color:#5eead4;">'+esc(u.display_id||"—")+'</div></div>'+
         '<label class="lbl">Name</label><input id="eu-name" value="'+esc(u.name)+'" />'+
         '<label class="lbl">Email</label><input id="eu-email" value="'+esc(u.email)+'" />'+
         '<label class="lbl">Tier</label><select id="eu-tier">'+tierOpts+'</select>'+
@@ -1052,7 +1094,7 @@ function renderModal(){
     return '<div class="modal-scrim" onclick="if(event.target===this)closeModal()"><div class="modal">'+
       '<div class="modal-head"><strong>Edit task</strong><button class="modal-close" onclick="closeModal()">×</button></div>'+
       '<div class="modal-body">'+
-        '<div class="kv"><div>Task ID</div><div style="word-break:break-all;">'+esc(t.id)+'</div></div>'+
+        '<div class="kv"><div>Task ID</div><div class="mono" style="word-break:break-all;font-size:12px;">'+esc(t.id)+'</div></div>'+
         '<div class="kv"><div>Escrow remaining</div><div>'+fmtN(t.escrow_remaining||0)+' / '+fmtN(t.escrow_total||t.advertiser_total||0)+'</div></div>'+
         '<label class="lbl">Category</label><select id="et-category">'+catOpts+'</select>'+
         '<label class="lbl">Reward per task</label><input id="et-reward" type="number" value="'+t.reward+'" />'+
@@ -1074,7 +1116,8 @@ function renderModal(){
     return '<div class="modal-scrim" onclick="if(event.target===this)closeModal()"><div class="modal" style="max-width:520px;">'+
       '<div class="modal-head"><strong>Adjust — '+label+'</strong><button class="modal-close" onclick="closeModal()">×</button></div>'+
       '<div class="modal-body">'+
-        '<div class="kv"><div>User</div><div>'+esc(u2.name)+' ('+esc(u2.email)+')</div>'+
+        '<div class="kv"><div>User</div><div>'+esc(u2.name)+' <span class="mono" style="font-size:12px;color:#5eead4;">'+esc(u2.display_id||"")+'</span></div>'+
+        '<div>Email</div><div>'+esc(u2.email)+'</div>'+
         '<div>Current</div><div>'+fmtN(u2[field])+'</div></div>'+
         '<label class="lbl">Amount (+ to add, − to subtract)</label>'+
         '<input id="ab-delta" type="number" placeholder="e.g. 5000 or -2500" />'+
@@ -1090,7 +1133,7 @@ function renderModal(){
 function render(){
   var body;
   if(!state.admin) body=renderLogin();
-  else body='<div class="hero"><h2>Admin control room</h2><p>Read and edit every user, task, submission, deposit, withdrawal, and settings. Every money edit is logged.</p>'+
+  else body='<div class="hero"><h2>Admin control room</h2><p>Read and edit every user, task, submission, deposit, withdrawal, and settings. Full bank details are shown for manual payment.</p>'+
     '<div style="margin-top:12px;"><button class="btn btn-ghost btn-sm" onclick="runSweep()">Run 24-hour sweep</button> <button class="btn btn-ghost btn-sm" onclick="refreshAll().then(render)">Refresh data</button></div></div>'+
     renderTabs()+renderAdminBody();
 

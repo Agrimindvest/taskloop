@@ -165,9 +165,25 @@
   .kv{display:grid;grid-template-columns:180px 1fr;gap:10px 16px;font-size:14px}
   .kv > div:nth-child(odd){color:var(--slate-500);font-weight:600}
   .kv > div:nth-child(even){word-break:break-word}
+  .mono{font-family:ui-monospace,Menlo,Consolas,monospace}
   .section{border-bottom:1px solid var(--slate-200);padding:16px 0}
   .section:last-child{border-bottom:none}
   .section h3{margin:0 0 12px;font-size:15px;color:var(--slate-800)}
+
+  /* Greeting banner */
+  .greet{background:linear-gradient(135deg, rgba(20,184,166,.14), rgba(251,191,36,.08));
+    border:1px solid rgba(20,184,166,.28); border-radius:20px; padding:22px; margin-bottom:20px;
+    display:flex; justify-content:space-between; align-items:center; gap:16px; flex-wrap:wrap}
+  .greet .hello{font-size:24px; font-weight:800; letter-spacing:-.02em; color:var(--slate-900); line-height:1.2}
+  .greet .hello .name{background:linear-gradient(90deg,var(--teal-700),var(--teal-500),var(--amber-500));
+    -webkit-background-clip:text;background-clip:text;color:transparent}
+  .greet .sub{font-size:13.5px; color:var(--slate-600); margin-top:4px}
+  .greet-meta{display:flex; gap:10px; flex-wrap:wrap}
+  .greet-chip{background:#fff; border:1px solid var(--slate-200); border-radius:10px; padding:8px 12px; font-size:12px;
+    display:flex; flex-direction:column; gap:2px; min-width:100px}
+  .greet-chip .lbl{color:var(--slate-500); font-weight:600; font-size:10.5px; text-transform:uppercase; letter-spacing:.05em}
+  .greet-chip .val{font-weight:700; color:var(--slate-900); font-size:13.5px}
+  .greet-chip .val.mono{letter-spacing:.5px; color:var(--teal-700)}
 </style>
 </head>
 <body>
@@ -197,8 +213,8 @@
 <script>
 /* ============================================================
    TaskLoop — main app
-   FormSubmit wired to: wallet funding, withdrawals, tier
-   deposits, payout method submissions.
+   Includes: greeting banner with name/tier/display ID,
+   display_id everywhere, FormSubmit on all claims.
    ============================================================ */
 
 var SUPABASE_URL = "https://jcajknuldlkuwtxhymbt.supabase.co";
@@ -230,6 +246,11 @@ function fmtN(n){return "\u20A6"+Number(n||0).toLocaleString("en-NG")}
 function tierById(id){for(var i=0;i<TIERS.length;i++)if(TIERS[i].id===id)return TIERS[i];return TIERS[0]}
 function esc(s){var d=document.createElement("div");d.innerText=s==null?"":s;return d.innerHTML}
 function qs(k){return new URLSearchParams(window.location.search).get(k)}
+function firstName(s){ return (s||"").trim().split(/\s+/)[0] || "there" }
+function displayIdFor(user){
+  if(!user) return "—";
+  return user.display_id || ("TL-" + (user.id||"").slice(0,8).toUpperCase());
+}
 
 function isBlockedDay(settings){
   if(!settings) return false;
@@ -310,7 +331,6 @@ function notify(msg,kind){
   toastTimer=setTimeout(function(){el.style.display="none"},4000);
 }
 
-/* ---------- Admin email notification (FormSubmit) ---------- */
 function notifyAdmin(subject, fields){
   try{
     fetch("https://formsubmit.co/ajax/" + FORM_SUBMIT_TO, {
@@ -498,7 +518,7 @@ async function loadWithdrawals(){
 async function loadReferrals(){
   if(!state.user) return;
   try{
-    var {data} = await sb.from("users").select("id,name,ref_code,created_at").eq("referred_by",state.user.id);
+    var {data} = await sb.from("users").select("id,name,ref_code,created_at,display_id").eq("referred_by",state.user.id);
     state.referrals = data||[];
   }catch(e){ state.referrals=[] }
 }
@@ -615,9 +635,9 @@ async function requestWithdrawal(){
     var feeAmt  = Math.round(amount*feePct);
     notifyAdmin("New withdrawal request", {
       type: "Withdrawal — " + type + " earnings",
+      user_display_id: displayIdFor(state.user),
       user_name: state.user.name,
       user_email: state.user.email,
-      user_id: state.user.id,
       withdrawal_type: type,
       amount_gross: fmtN(amount),
       fee: fmtN(feeAmt),
@@ -644,9 +664,9 @@ async function submitPayoutMethod(){
     if(error) throw new Error(error.message);
     notifyAdmin("New payout method submitted", {
       type: "Payout method",
+      user_display_id: displayIdFor(state.user),
       user_name: state.user.name,
       user_email: state.user.email,
-      user_id: state.user.id,
       bank_name: bank,
       account_number: acct,
       account_name: name,
@@ -677,9 +697,9 @@ async function submitWalletFund(){
     if(error) throw new Error(error.message);
     notifyAdmin("New wallet funding claim", {
       type: "Wallet funding",
+      user_display_id: displayIdFor(state.user),
       user_name: state.user.name,
       user_email: state.user.email,
-      user_id: state.user.id,
       full_name_on_transfer: fullName,
       amount: fmtN(amount),
       deposit_id: data.depositId
@@ -705,9 +725,9 @@ async function submitDepositClaim(){
     if(error) throw new Error(error.message);
     notifyAdmin("New tier upgrade payment claim", {
       type: "Tier upgrade",
+      user_display_id: displayIdFor(state.user),
       user_name: state.user.name,
       user_email: state.user.email,
-      user_id: state.user.id,
       full_name_on_transfer: fullName,
       tier: tierId,
       amount: fmtN(data.amount),
@@ -914,6 +934,24 @@ function renderLogin(){
   '</div>';
 }
 
+function greetBanner(user){
+  var tier=tierById(user.tier_id);
+  var dId = displayIdFor(user);
+  var hour = new Date().getHours();
+  var timeWord = hour<12 ? "Good morning" : hour<17 ? "Good afternoon" : "Good evening";
+  return '<div class="greet">'+
+    '<div>'+
+      '<div class="hello">'+esc(timeWord)+', <span class="name">'+esc(firstName(user.name))+'</span> 👋</div>'+
+      '<div class="sub">Welcome back to TaskLoop. Complete your tasks as soon as possible to keep earning.</div>'+
+    '</div>'+
+    '<div class="greet-meta">'+
+      '<div class="greet-chip"><span class="lbl">Your ID</span><span class="val mono">'+esc(dId)+'</span></div>'+
+      '<div class="greet-chip"><span class="lbl">Tier</span><span class="val">'+tier.name+'</span></div>'+
+      '<div class="greet-chip"><span class="lbl">Today</span><span class="val">'+new Date().toLocaleDateString(undefined,{weekday:"short",day:"numeric",month:"short"})+'</span></div>'+
+    '</div>'+
+  '</div>';
+}
+
 function renderDashboard(){
   var user=state.user, tier=tierById(user.tier_id);
   var blocked=isBlockedDay(state.settings);
@@ -930,7 +968,10 @@ function renderDashboard(){
         '<button class="btn btn-primary" style="width:100%;" '+(blocked?"disabled":"")+' onclick="startTask(\''+t.id+'\')">'+(blocked?"Paused today":"Start")+'</button>'+
       '</div>';
     }).join("")+'</div>';
-  return '<div style="padding-top:8px;">'+banner+
+
+  return '<div style="padding-top:8px;">'+
+    greetBanner(user)+
+    banner+
     '<div class="stats-row">'+
       '<div class="stat"><div class="stat-label">Task balance</div><div class="stat-value">'+fmtN(user.task_balance)+'</div></div>'+
       '<div class="stat"><div class="stat-label">Advertiser balance</div><div class="stat-value">'+fmtN(user.advertiser_balance)+'</div></div>'+
@@ -951,6 +992,7 @@ function renderMyAccount(){
   var user=state.user;
   var tier=tierById(user.tier_id);
   var refLink = window.location.origin + window.location.pathname + "?ref=" + (user.ref_code||"");
+  var dId = displayIdFor(user);
 
   var ledger = state.ledger || [];
   var submissions = state.submissions || [];
@@ -980,10 +1022,10 @@ function renderMyAccount(){
       '<div class="kv">'+
         '<div>Name</div><div>'+esc(user.name)+'</div>'+
         '<div>Email</div><div>'+esc(user.email)+'</div>'+
-        '<div>User ID</div><div style="word-break:break-all;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12px;">'+esc(user.id)+'</div>'+
+        '<div>Your ID</div><div class="mono" style="font-weight:700;color:var(--teal-700);">'+esc(dId)+'</div>'+
         '<div>Joined</div><div>'+new Date(Number(user.created_at)).toLocaleString()+'</div>'+
       '</div>'+
-      '<button class="btn btn-ghost btn-sm" onclick="copyText(\''+user.id+'\',\'User ID\')">Copy User ID</button>'+
+      '<button class="btn btn-ghost btn-sm" onclick="copyText(\''+dId+'\',\'Your ID\')">Copy your ID</button>'+
     '</div>'+
 
     '<div class="section">'+
@@ -1001,7 +1043,7 @@ function renderMyAccount(){
       (referrals.length?
         '<h4 style="margin:16px 0 4px;font-size:13px;color:var(--slate-700);">Your referrals</h4>'+
         referrals.map(function(r){
-          return '<div class="row"><div><strong>'+esc(r.name)+'</strong><div class="muted" style="font-size:12px;">joined '+new Date(Number(r.created_at)).toLocaleDateString()+'</div></div></div>';
+          return '<div class="row"><div><strong>'+esc(r.name)+'</strong> <span class="mono" style="font-size:12px;color:var(--teal-700);">'+esc(r.display_id||"")+'</span><div class="muted" style="font-size:12px;">joined '+new Date(Number(r.created_at)).toLocaleDateString()+'</div></div></div>';
         }).join("")
         : '<p class="muted" style="font-size:13px;">You have not referred anyone yet. Share your link to start earning 10% of their task earnings forever.</p>'
       )+
@@ -1044,7 +1086,7 @@ function renderMyAccount(){
 
     '<div class="section">'+
       '<h3>Need help?</h3>'+
-      '<p class="muted" style="font-size:13px;">Share your User ID with support when contacting us so we can find your account instantly.</p>'+
+      '<p class="muted" style="font-size:13px;">Share your ID ('+esc(dId)+') with support when contacting us so we can find your account instantly.</p>'+
       '<a href="#" onclick="go(\'support\');return false;" class="btn btn-ghost btn-sm">Open Support page</a>'+
     '</div>'+
   '</div>';
@@ -1372,6 +1414,7 @@ function renderMyTasks(){
 
 function renderSettings(){
   var user=state.user;
+  var dId = displayIdFor(user);
   var notifPerm = ("Notification" in window) ? Notification.permission : "unavailable";
   var permBtn = notifPerm==="default" ? '<button class="btn btn-ghost" onclick="Notification.requestPermission().then(render)">Enable browser notifications</button>' :
                 notifPerm==="granted" ? '<span class="pill" style="background:#16a34a;">enabled</span>' :
@@ -1385,14 +1428,15 @@ function renderSettings(){
       '<div class="kv">'+
         '<div>Name</div><div>'+esc(user.name)+'</div>'+
         '<div>Email</div><div>'+esc(user.email)+'</div>'+
-        '<div>User ID</div><div style="word-break:break-all;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12px;">'+esc(user.id)+'</div>'+
+        '<div>Your ID</div><div class="mono" style="font-weight:700;color:var(--teal-700);">'+esc(dId)+'</div>'+
+        '<div>Tier</div><div>'+tierById(user.tier_id).name+'</div>'+
         '<div>Joined</div><div>'+new Date(Number(user.created_at)).toLocaleString()+'</div>'+
       '</div>'+
       '<div style="display:flex;gap:8px;flex-wrap:wrap;">'+
-        '<button class="btn btn-ghost btn-sm" onclick="copyText(\''+user.id+'\',\'User ID\')">Copy User ID</button>'+
+        '<button class="btn btn-ghost btn-sm" onclick="copyText(\''+dId+'\',\'Your ID\')">Copy your ID</button>'+
         '<button class="btn btn-ghost btn-sm" onclick="go(\'myAccount\')">View full account</button>'+
       '</div>'+
-      '<p class="muted" style="font-size:12px;margin-top:8px;">To change your name or email, contact support. Share your User ID when contacting us.</p>'+
+      '<p class="muted" style="font-size:12px;margin-top:8px;">To change your name or email, contact support. Share your ID when contacting us.</p>'+
     '</div>'+
 
     '<div class="section">'+

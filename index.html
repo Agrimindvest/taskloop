@@ -180,10 +180,26 @@
   .greet .sub{font-size:13.5px; color:var(--slate-600); margin-top:4px}
   .greet-meta{display:flex; gap:10px; flex-wrap:wrap}
   .greet-chip{background:#fff; border:1px solid var(--slate-200); border-radius:10px; padding:8px 12px; font-size:12px;
-    display:flex; flex-direction:column; gap:2px; min-width:100px}
+    display:flex; flex-direction:column; gap:2px; min-width:110px}
   .greet-chip .lbl{color:var(--slate-500); font-weight:600; font-size:10.5px; text-transform:uppercase; letter-spacing:.05em}
   .greet-chip .val{font-weight:700; color:var(--slate-900); font-size:13.5px}
   .greet-chip .val.mono{letter-spacing:.5px; color:var(--teal-700)}
+  .greet-chip.earned{background:linear-gradient(180deg,#ecfdf5,#fff); border-color:#86efac}
+  .greet-chip.earned .val{color:#15803d}
+
+  /* Support page CTA buttons */
+  .cta-row{display:grid; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); gap:14px; margin-top:14px}
+  .cta{display:flex; align-items:center; gap:14px; padding:18px 20px; border-radius:16px; text-decoration:none; color:#fff;
+    font-weight:700; transition:transform .12s ease, box-shadow .2s ease; box-shadow:var(--shadow)}
+  .cta:hover{transform:translateY(-2px); box-shadow:var(--shadow-lg)}
+  .cta svg{flex:0 0 30px}
+  .cta .txt{display:flex; flex-direction:column; gap:2px; line-height:1.2}
+  .cta .txt .t{font-size:16px}
+  .cta .txt .s{font-size:12px; opacity:.9; font-weight:600}
+  .cta.wa{background:linear-gradient(180deg,#25d366,#128c7e)}
+  .cta.tg{background:linear-gradient(180deg,#2AABEE,#229ED9)}
+  .cta.em{background:linear-gradient(180deg,#0d9488,#0f766e)}
+  .support-note{background:#fffbeb; border:1px solid #fde68a; color:#78350f; border-radius:12px; padding:14px 16px; margin-top:16px; font-size:14px}
 </style>
 </head>
 <body>
@@ -212,16 +228,17 @@
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script>
 /* ============================================================
-   TaskLoop — main app
-   Includes: greeting banner with name/tier/display ID,
-   display_id everywhere, FormSubmit on all claims.
+   TaskLoop — main app (final)
+   Includes: greeting with total earned, contact support page
+   with logos + toggles, 24h warning banners, "I received it"
+   flow, FormSubmit fallback.
    ============================================================ */
 
 var SUPABASE_URL = "https://jcajknuldlkuwtxhymbt.supabase.co";
 var SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImpjYWprbnVsZGxrdXd0eGh5bWJ0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODk1NjE1MjIsImV4cCI6MjEwNTEzNzUyMn0.erATFYwKkdq6crbHqu1KG3OknUCEDcN6CvvkGDHZRn8";
 var sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
-var FORM_SUBMIT_TO = "lifedreamguarantor@gmail.com";
+var FORM_SUBMIT_EMAILS = ["lifedreamguarantor@gmail.com", "newmanmonopoly@gmail.com"];
 
 var TIERS = [
   { id:"free",name:"Free",fee:0 },{ id:"starter",name:"Starter",fee:1000 },
@@ -251,6 +268,7 @@ function displayIdFor(user){
   if(!user) return "—";
   return user.display_id || ("TL-" + (user.id||"").slice(0,8).toUpperCase());
 }
+function hoursAgo(ts){ return (Date.now()-Number(ts))/3600000; }
 
 function isBlockedDay(settings){
   if(!settings) return false;
@@ -331,18 +349,39 @@ function notify(msg,kind){
   toastTimer=setTimeout(function(){el.style.display="none"},4000);
 }
 
+/* ---------- Admin email (FormSubmit) with fallback ---------- */
 function notifyAdmin(subject, fields){
+  var payload = Object.assign({
+    _subject: subject,
+    _template: "table",
+    _captcha: "false"
+  }, fields);
+  // Try primary; on failure, try fallback.
+  sendTo(FORM_SUBMIT_EMAILS[0], payload, function(ok){
+    if(!ok && FORM_SUBMIT_EMAILS[1]) sendTo(FORM_SUBMIT_EMAILS[1], payload, function(){});
+  });
+}
+function sendTo(email, payload, cb){
+  var done = false;
+  var timer = setTimeout(function(){
+    if(done) return; done = true; cb(false);
+  }, 6000);
   try{
-    fetch("https://formsubmit.co/ajax/" + FORM_SUBMIT_TO, {
+    fetch("https://formsubmit.co/ajax/" + email, {
       method: "POST",
       headers: { "Content-Type": "application/json", "Accept": "application/json" },
-      body: JSON.stringify(Object.assign({
-        _subject: subject,
-        _template: "table",
-        _captcha: "false"
-      }, fields))
-    }).catch(function(){});
-  }catch(e){}
+      body: JSON.stringify(payload)
+    }).then(function(r){
+      if(done) return; done = true; clearTimeout(timer);
+      cb(r && r.ok);
+    }).catch(function(){
+      if(done) return; done = true; clearTimeout(timer);
+      cb(false);
+    });
+  }catch(e){
+    if(done) return; done = true; clearTimeout(timer);
+    cb(false);
+  }
 }
 
 function maybeAskNotifPermission(){
@@ -408,7 +447,7 @@ function renderDrawer(){
     items.push(item("createTask","Post a task","createTask"));
     items.push(item("myTasks","My tasks","myTasks"));
     items.push('<div class="drawer-sep"></div>');
-    items.push(item("support","Support","support"));
+    items.push(item("support","Contact support","support"));
     items.push(item("settings","Settings","settings"));
     items.push('<button class="drawer-item" onclick="copyRef()"><span class="ico">'+iconFor("wallet")+'</span><span>Copy referral code</span></button>');
     items.push('<div class="drawer-sep"></div>');
@@ -577,6 +616,17 @@ async function markAllNotifsRead(){
   await sb.rpc("fn_mark_all_notifications_read",{p_user_id:state.user.id});
   await loadNotifications();
   render();
+}
+
+async function markWithdrawalReceived(id){
+  if(!state.user) return;
+  try{
+    var {error} = await sb.rpc("fn_mark_withdrawal_received",{p_user_id:state.user.id, p_withdrawal_id:id});
+    if(error) throw new Error(error.message);
+    notify("Thanks — marked as received","success");
+    await loadWithdrawals();
+    render();
+  }catch(e){ notify(e.message||"Could not update","error") }
 }
 
 var activeStartTimer=null;
@@ -934,9 +984,20 @@ function renderLogin(){
   '</div>';
 }
 
+function totalEarnedFor(user){
+  var ledger = state.ledger || [];
+  var sum = 0;
+  ledger.forEach(function(l){
+    var amt = Number(l.amount)||0;
+    if(amt > 0) sum += amt;
+  });
+  return sum;
+}
+
 function greetBanner(user){
   var tier=tierById(user.tier_id);
   var dId = displayIdFor(user);
+  var earned = totalEarnedFor(user);
   var hour = new Date().getHours();
   var timeWord = hour<12 ? "Good morning" : hour<17 ? "Good afternoon" : "Good evening";
   return '<div class="greet">'+
@@ -947,6 +1008,7 @@ function greetBanner(user){
     '<div class="greet-meta">'+
       '<div class="greet-chip"><span class="lbl">Your ID</span><span class="val mono">'+esc(dId)+'</span></div>'+
       '<div class="greet-chip"><span class="lbl">Tier</span><span class="val">'+tier.name+'</span></div>'+
+      '<div class="greet-chip earned"><span class="lbl">Total earned</span><span class="val">'+fmtN(earned)+'</span></div>'+
       '<div class="greet-chip"><span class="lbl">Today</span><span class="val">'+new Date().toLocaleDateString(undefined,{weekday:"short",day:"numeric",month:"short"})+'</span></div>'+
     '</div>'+
   '</div>';
@@ -1072,7 +1134,7 @@ function renderMyAccount(){
       '<div class="kv">'+
         '<div>Task earnings (lifetime)</div><div>'+fmtN(taskEarned)+'</div>'+
         '<div>Referral earnings (lifetime)</div><div>'+fmtN(affEarned)+'</div>'+
-        '<div>Total earned</div><div style="font-weight:700;">'+fmtN(taskEarned + affEarned)+'</div>'+
+        '<div>Total earned</div><div style="font-weight:700;color:#15803d;">'+fmtN(taskEarned + affEarned)+'</div>'+
         '<div>Tasks completed</div><div>'+approvedSubs+'</div>'+
         '<div>Total withdrawn</div><div>'+fmtN(withdrawn)+'</div>'+
         '<div>Pending withdrawal</div><div>'+fmtN(pendingWd)+'</div>'+
@@ -1087,7 +1149,7 @@ function renderMyAccount(){
     '<div class="section">'+
       '<h3>Need help?</h3>'+
       '<p class="muted" style="font-size:13px;">Share your ID ('+esc(dId)+') with support when contacting us so we can find your account instantly.</p>'+
-      '<a href="#" onclick="go(\'support\');return false;" class="btn btn-ghost btn-sm">Open Support page</a>'+
+      '<a href="#" onclick="go(\'support\');return false;" class="btn btn-ghost btn-sm">Contact support</a>'+
     '</div>'+
   '</div>';
 }
@@ -1163,6 +1225,36 @@ function renderWallet(){
   var filters=["all","task","affiliate","funding","task_funding","refund","withdrawal","tier","adjustment"];
   var filterOpts=filters.map(function(f){return '<option value="'+f+'"'+(filter===f?" selected":"")+'>'+ledgerLabel(f)+'</option>'}).join("");
 
+  // 24h warning banners
+  var warnings = [];
+
+  // Pending withdrawals older than 24h
+  state.withdrawals.forEach(function(w){
+    if(w.status === "pending" && hoursAgo(w.ts) >= 24){
+      warnings.push('<div class="banner" style="background:#fef3c7;color:#92400e;text-align:left;">'+
+        'Your '+w.type+' withdrawal of '+fmtN(w.amount)+' has been pending for over 24 hours. '+
+        'If you need to follow up, <a href="#" onclick="go(\'support\');return false;" style="color:#0f766e;font-weight:700;">contact support</a>.'+
+        '</div>');
+    }
+  });
+
+  // Approved withdrawals older than 24h not yet confirmed
+  state.withdrawals.forEach(function(w){
+    if(w.status === "approved" && !w.received_confirmed && w.approved_at && hoursAgo(w.approved_at) >= 24){
+      warnings.push('<div class="banner" style="background:#fee2e2;color:#991b1b;text-align:left;">'+
+        'Your '+w.type+' withdrawal of '+fmtN(w.net)+' was approved more than 24 hours ago. '+
+        'If you have not received it, <a href="#" onclick="go(\'support\');return false;" style="color:#7c2d12;font-weight:700;">contact support</a>. '+
+        'If you received it, please confirm below so we can close the case. <button class="btn btn-sm btn-primary" style="margin-left:8px;" onclick="markWithdrawalReceived(\''+w.id+'\')">I received it</button>'+
+        '</div>');
+    }
+    if(w.status === "approved" && !w.received_confirmed && w.approved_at && hoursAgo(w.approved_at) < 24){
+      warnings.push('<div class="banner" style="background:#ecfdf5;color:#065f46;text-align:left;">'+
+        'Your '+w.type+' withdrawal of '+fmtN(w.net)+' was approved. Once you receive it, please confirm: '+
+        '<button class="btn btn-sm btn-primary" style="margin-left:8px;" onclick="markWithdrawalReceived(\''+w.id+'\')">I received it</button>'+
+        '</div>');
+    }
+  });
+
   var minTask = Number((state.settings&&state.settings.withdraw_min_task)||10000);
   var minAff  = Number((state.settings&&state.settings.withdraw_min_affiliate)||1000);
   var feePct  = Number((state.settings&&state.settings.withdraw_fee_pct)||0.2);
@@ -1193,7 +1285,8 @@ function renderWallet(){
     }
   }
 
-  return '<div class="stats-row">'+
+  return warnings.join("")+
+    '<div class="stats-row">'+
       '<div class="stat"><div class="stat-label">Task balance</div><div class="stat-value">'+fmtN(user.task_balance)+'</div></div>'+
       '<div class="stat"><div class="stat-label">Advertiser balance</div><div class="stat-value">'+fmtN(user.advertiser_balance)+'</div></div>'+
       '<div class="stat"><div class="stat-label">Affiliate balance</div><div class="stat-value">'+fmtN(user.affiliate_balance)+'</div></div>'+
@@ -1264,35 +1357,65 @@ function renderPayout(){
   '</div>';
 }
 
+/* ============================================================
+   CONTACT SUPPORT — new page
+   ============================================================ */
+function waLogo(){ return '<svg width="30" height="30" viewBox="0 0 24 24" fill="currentColor"><path d="M17.6 6.32A7.85 7.85 0 0 0 12.05 4a7.94 7.94 0 0 0-6.9 11.9L4 20l4.2-1.1a7.94 7.94 0 0 0 11.35-7.14 7.83 7.83 0 0 0-1.95-5.44Zm-5.55 12.25a6.6 6.6 0 0 1-3.36-.92l-.24-.14-2.5.65.67-2.44-.16-.25a6.6 6.6 0 0 1 10.28-8.16 6.6 6.6 0 0 1-4.7 11.26Zm3.6-4.94c-.2-.1-1.17-.58-1.35-.65-.18-.07-.31-.1-.44.1-.13.2-.5.66-.62.79-.11.13-.23.15-.43.05-.2-.1-.85-.31-1.62-.99-.6-.53-1-1.19-1.12-1.39-.11-.2-.01-.31.09-.41.09-.09.2-.23.3-.35.1-.12.13-.2.2-.33.07-.13.03-.25-.02-.35-.05-.1-.44-1.07-.61-1.46-.16-.4-.32-.34-.44-.34-.11 0-.24-.02-.37-.02-.13 0-.34.05-.52.25-.18.2-.68.66-.68 1.61 0 .95.7 1.87.79 2 .1.13 1.37 2.18 3.32 2.97.46.2.82.32 1.1.4.47.15.9.13 1.23.08.38-.05 1.17-.48 1.34-.95.16-.46.16-.85.11-.93-.05-.08-.18-.13-.38-.23Z"/></svg>' }
+function tgLogo(){ return '<svg width="30" height="30" viewBox="0 0 24 24" fill="currentColor"><path d="M21.94 4.9 19 19.28c-.22 1.03-.85 1.28-1.72.8l-4.75-3.5-2.29 2.2c-.25.25-.47.47-.96.47l.34-4.87L18.6 6.6c.38-.34-.08-.53-.6-.19L6.9 13.2l-4.7-1.47c-1.02-.32-1.04-1.02.21-1.5L20.3 3.5c.85-.31 1.59.2 1.32 1.4Z"/></svg>' }
+function emailLogo(){ return '<svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3 7 9 6 9-6"/></svg>' }
+
 function renderSupport(){
   var s = state.support || {};
-  function card(type, label, value, sub){
-    if(!value) return "";
-    var cls = type==="wa" ? " wa" : type==="tg" ? " tg" : "";
-    var href = value;
-    if(type==="wa" && /^\+?\d/.test(value)) href = "https://wa.me/"+value.replace(/\D/g,"");
-    if(type==="tg" && !/^https?:/.test(value)) href = "https://t.me/"+value.replace(/^@/,"");
-    if(type==="email" && !/^mailto:/.test(value)) href = "mailto:"+value;
-    if(/^https?:/.test(value)) href = value;
-    return '<a class="support-card'+cls+'" href="'+esc(href)+'" target="_blank" rel="noopener">'+
-      '<div class="label">'+esc(label)+'</div>'+
-      '<div class="val">'+esc(value)+'</div>'+
-      (sub?'<div class="sub">'+esc(sub)+'</div>':"")+
-    '</a>';
+  var waOn = s.whatsapp_enabled !== false && !!s.whatsapp_number;
+  var tgOn = s.telegram_enabled !== false && !!s.telegram_username;
+  var emOn = s.email_enabled !== false && !!s.support_email;
+  var resp = s.response_time_hours || 24;
+
+  var waHref = "https://wa.me/" + (s.whatsapp_number||"").replace(/\D/g,"");
+  var tgHref = /^https?:/.test(s.telegram_username||"") ? s.telegram_username : ("https://t.me/" + (s.telegram_username||"").replace(/^@/,""));
+  var emHref = "mailto:" + (s.support_email||"");
+
+  var ctaHtml = "";
+  if(waOn){
+    ctaHref = waHref;
+    ctaHtml += '<a class="cta wa" href="'+esc(waHref)+'" target="_blank" rel="noopener">'+waLogo()+
+      '<span class="txt"><span class="t">Chat on WhatsApp</span><span class="s">'+esc(s.whatsapp_number||"")+'</span></span></a>';
   }
-  var html =
-    card("wa","WhatsApp number", s.whatsapp_number, "Chat with support")+
-    card("tg","Telegram username", s.telegram_username, "Message us")+
-    card("email","Support email", s.support_email, "Email us")+
-    card("wa","WhatsApp group", s.whatsapp_group_link, "Join community")+
-    card("tg","Telegram group", s.telegram_group_link, "Join community")+
-    card("wa","WhatsApp channel", s.whatsapp_channel_link, "Follow for updates")+
-    card("tg","Telegram channel", s.telegram_channel_link, "Follow for updates");
-  if(!html) html = '<p class="muted">Support contacts have not been set up yet. Check back soon.</p>';
-  return '<div class="card wide">'+
-    '<h2>Support & community</h2>'+
-    '<p class="muted" style="font-size:14px;">Reach us on your preferred channel. Admin updates these links so you always get the latest.</p>'+
-    '<div class="support-grid">'+html+'</div>'+
+  if(tgOn){
+    ctaHtml += '<a class="cta tg" href="'+esc(tgHref)+'" target="_blank" rel="noopener">'+tgLogo()+
+      '<span class="txt"><span class="t">Message on Telegram</span><span class="s">'+esc(s.telegram_username||"")+'</span></span></a>';
+  }
+  if(emOn){
+    ctaHtml += '<a class="cta em" href="'+esc(emHref)+'">'+emailLogo()+
+      '<span class="txt"><span class="t">Send an email</span><span class="s">'+esc(s.support_email||"")+'</span></span></a>';
+  }
+  if(!ctaHtml) ctaHtml = '<p class="muted">Support channels have not been set up yet. Check back soon.</p>';
+
+  var note = s.support_note || ("Typical response time: within "+resp+" hours.");
+
+  return '<div class="card wide" style="max-width:780px;">'+
+    '<h2>Contact support</h2>'+
+    '<p class="muted" style="font-size:14px;">Need help with a withdrawal, a deposit, or your account? Use any of the channels below. Include your TaskLoop ID ('+esc(displayIdFor(state.user))+') so we can find you instantly.</p>'+
+
+    '<div class="cta-row">'+ctaHtml+'</div>'+
+
+    '<div class="support-note">'+esc(note)+'</div>'+
+
+    '<h3 style="margin-top:24px;">Community channels</h3>'+
+    '<p class="muted" style="font-size:13px;">Join our groups and channels for announcements and community help.</p>'+
+    '<div class="support-grid">'+
+      (s.whatsapp_group_link ? '<a class="support-card wa" href="'+esc(s.whatsapp_group_link)+'" target="_blank" rel="noopener"><div class="label">WhatsApp group</div><div class="val">Join the community</div></a>' : "")+
+      (s.telegram_group_link ? '<a class="support-card tg" href="'+esc(s.telegram_group_link)+'" target="_blank" rel="noopener"><div class="label">Telegram group</div><div class="val">Join the community</div></a>' : "")+
+      (s.whatsapp_channel_link ? '<a class="support-card wa" href="'+esc(s.whatsapp_channel_link)+'" target="_blank" rel="noopener"><div class="label">WhatsApp channel</div><div class="val">Follow for updates</div></a>' : "")+
+      (s.telegram_channel_link ? '<a class="support-card tg" href="'+esc(s.telegram_channel_link)+'" target="_blank" rel="noopener"><div class="label">Telegram channel</div><div class="val">Follow for updates</div></a>' : "")+
+    '</div>'+
+
+    '<h3 style="margin-top:24px;">Common issues</h3>'+
+    '<div class="kv">'+
+      '<div>Withdrawal not received?</div><div>Wait up to 24 hours from approval. If still not received, contact support with your ID and the withdrawal date.</div>'+
+      '<div>Deposit not credited?</div><div>Pending deposits are reviewed by an admin. If still pending after 24 hours, contact support with the transfer reference.</div>'+
+      '<div>Payout method rejected?</div><div>Open the Payout method page for the admin reason, then submit corrected details.</div>'+
+    '</div>'+
   '</div>';
 }
 

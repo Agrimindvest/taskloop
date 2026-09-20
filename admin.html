@@ -174,8 +174,6 @@
 <script>
 /* ============================================================
    TaskLoop — admin portal (final)
-   Includes: tier benefits editor, support toggles, bank editor,
-   24h flags, full bank details, broadcast, audit.
    ============================================================ */
 
 var SUPABASE_URL = "https://jcajknuldlkuwtxhymbt.supabase.co";
@@ -211,6 +209,9 @@ var state = {
   editBlockedDays: [], editBlockedDates: [], editExpiryDays: 30,
   editWithdrawTaskDays: [], editWithdrawAffiliateDays: [],
   editWithdrawMinTask: 10000, editWithdrawMinAffiliate: 1000, editWithdrawFeePct: 20,
+  editDefaultReservedWindow: 12,
+  editMinReserveFloor: 2,
+  editMaxReservePct: 50,
   editSupport: {}, editBanks: {},
   broadcastMode: "all", broadcastKind: "broadcast"
 };
@@ -443,6 +444,9 @@ function loadSettingsIntoEditor(){
     state.editWithdrawMinTask = Number(state.settings.withdraw_min_task||10000);
     state.editWithdrawMinAffiliate = Number(state.settings.withdraw_min_affiliate||1000);
     state.editWithdrawFeePct = Math.round(Number(state.settings.withdraw_fee_pct||0.2)*100);
+    state.editDefaultReservedWindow = Number(state.settings.default_reserved_window_hours||12);
+    state.editMinReserveFloor = Number(state.settings.min_reserve_floor||2);
+    state.editMaxReservePct = Number(state.settings.max_reserve_pct||50);
     state.editBanks = {
       wallet_bank_number: state.settings.wallet_bank_number || "",
       wallet_bank_name:   state.settings.wallet_bank_name   || "",
@@ -499,6 +503,12 @@ function saveSettings(){
   state.editWithdrawMinTask = Number(document.getElementById("wd-min-task").value)||10000;
   state.editWithdrawMinAffiliate = Number(document.getElementById("wd-min-affiliate").value)||1000;
   state.editWithdrawFeePct = Number(document.getElementById("wd-fee-pct").value)||20;
+  var drwEl = document.getElementById("default-reserved-window");
+  var mrfEl = document.getElementById("min-reserve-floor");
+  var mrpEl = document.getElementById("max-reserve-pct");
+  if(drwEl) state.editDefaultReservedWindow = Number(drwEl.value)||12;
+  if(mrfEl) state.editMinReserveFloor = Number(mrfEl.value);
+  if(mrpEl) state.editMaxReservePct = Number(mrpEl.value);
   callAdmin("fn_admin_update_settings",{
     p_blocked_days: state.editBlockedDays,
     p_blocked_dates: state.editBlockedDates,
@@ -507,7 +517,10 @@ function saveSettings(){
     p_withdraw_affiliate_days: state.editWithdrawAffiliateDays,
     p_withdraw_min_task: state.editWithdrawMinTask,
     p_withdraw_min_affiliate: state.editWithdrawMinAffiliate,
-    p_withdraw_fee_pct: state.editWithdrawFeePct/100
+    p_withdraw_fee_pct: state.editWithdrawFeePct/100,
+    p_default_reserved_window_hours: state.editDefaultReservedWindow,
+    p_min_reserve_floor: state.editMinReserveFloor,
+    p_max_reserve_pct: state.editMaxReservePct
   },"Settings saved");
 }
 function saveSupport(){
@@ -529,19 +542,6 @@ function saveSupport(){
 }
 function updateSupportField(k, v){ state.editSupport[k]=v; }
 function toggleSupportField(k){ state.editSupport[k] = !state.editSupport[k]; render(); }
-
-function updateBankField(k, v){ state.editBanks[k]=v; }
-function saveBanks(){
-  var b=state.editBanks||{};
-  callAdmin("fn_admin_update_banks",{
-    p_wallet_number: b.wallet_bank_number||null,
-    p_wallet_name:   b.wallet_bank_name||null,
-    p_wallet_label:  b.wallet_bank_label||null,
-    p_tier_number:   b.tier_bank_number||null,
-    p_tier_name:     b.tier_bank_name||null,
-    p_tier_label:    b.tier_bank_label||null
-  },"Bank accounts saved");
-}
 
 /* ---------- TIER BENEFITS ---------- */
 function tbPreview(tierId){
@@ -601,6 +601,103 @@ async function saveTierBenefit(tierId){
     notify("Saved " + tierId + " benefits","success");
     await refreshAll();
   }catch(e){ notify(e.message||"Could not save","error") }
+}
+
+/* ---------- TASK RESERVATION (Step F) ---------- */
+function taskReservedWindowHours(task){
+  return Number(task.reserved_window_hours != null ? task.reserved_window_hours : 12);
+}
+function taskReservedWindowActive(task){
+  if(!task || !task.premium) return false;
+  var w = taskReservedWindowHours(task);
+  if(w <= 0) return false;
+  var windowMs = w * 3600 * 1000;
+  var releaseAt = Number(task.created_at || 0) + windowMs;
+  return Date.now() < releaseAt;
+}
+function taskReserveSecondsLeft(task){
+  if(!taskReservedWindowActive(task)) return 0;
+  var releaseAt = Number(task.created_at || 0) + taskReservedWindowHours(task) * 3600 * 1000;
+  return Math.max(0, Math.floor((releaseAt - Date.now())/1000));
+}
+function humanizeSeconds(s){
+  if(s <= 0) return "now";
+  var h = Math.floor(s/3600);
+  var m = Math.floor((s%3600)/60);
+  if(h > 0) return h + "h " + m + "m";
+  return m + "m";
+}
+function adminComputeReserve(task){
+  if(!task || !task.premium) return 0;
+  if(task.reserved_slots_override != null) return Math.max(0, Math.min(task.reserved_slots_override, task.quantity));
+  var total = state.users.length || 0;
+  var paid = (state.users||[]).filter(function(u){ return u.tier_id && u.tier_id !== "free"; }).length;
+  if(total === 0 || paid === 0) return 0;
+  var ratio = paid / total;
+  var raw = Math.round(task.quantity * ratio);
+  var floorV = Number((state.settings && state.settings.min_reserve_floor) || 2);
+  var maxPctV = Number((state.settings && state.settings.max_reserve_pct) || 50);
+  var r = Math.max(floorV, raw);
+  var cap = Math.floor(task.quantity * maxPctV / 100);
+  if(r > cap) r = cap;
+  return Math.max(0, r);
+}
+function adminPoolInfo(task){
+  var q = Number(task.quantity||0);
+  var completed = Number(task.completed||0);
+  var remaining = Math.max(0, q - completed);
+  if(!task.premium){
+    return { premium:false, reserved:0, general:remaining, inWindow:false, windowSec:0 };
+  }
+  var inWindow = taskReservedWindowActive(task);
+  var reserved = inWindow ? adminComputeReserve(task) : 0;
+  var reservedTaken = Math.min(completed, reserved);
+  var generalTaken = Math.max(0, completed - reservedTaken);
+  var reservedLeft = Math.max(0, reserved - reservedTaken);
+  var generalLeft = Math.max(0, remaining - reservedLeft);
+  return {
+    premium:true,
+    reserved:reserved,
+    general: q - reserved,
+    reservedLeft: reservedLeft,
+    generalLeft: generalLeft,
+    reservedTaken: reservedTaken,
+    inWindow: inWindow,
+    windowSec: taskReserveSecondsLeft(task)
+  };
+}
+function openTaskReservation(taskId){
+  state.modal = { type: "reservation", id: taskId };
+  render();
+}
+function saveTaskReservation(){
+  var t = state.tasks.filter(function(x){ return x.id === state.modal.id; })[0];
+  if(!t){ closeModal(); return; }
+  var winVal = document.getElementById("rv-window").value;
+  var ovVal = document.getElementById("rv-override").value;
+  var overrideNum = (ovVal === "" || ovVal == null) ? null : Number(ovVal);
+  callAdmin("fn_admin_update_task_reservation",{
+    p_task_id: t.id,
+    p_reserved_window_hours: (winVal === "" ? null : Number(winVal)),
+    p_reserved_slots_override: overrideNum
+  }, "Reservation updated").then(function(ok){ if(ok) closeModal(); });
+}
+function releaseReservedNow(taskId){
+  if(!confirm("Release all reserved slots for this task immediately? Free-tier workers will be able to take them right away.")) return;
+  callAdmin("fn_admin_release_reserved",{ p_task_id: taskId }, "Reserved slots released");
+}
+
+function updateBankField(k, v){ state.editBanks[k]=v; }
+function saveBanks(){
+  var b=state.editBanks||{};
+  callAdmin("fn_admin_update_banks",{
+    p_wallet_number: b.wallet_bank_number||null,
+    p_wallet_name:   b.wallet_bank_name||null,
+    p_wallet_label:  b.wallet_bank_label||null,
+    p_tier_number:   b.tier_bank_number||null,
+    p_tier_name:     b.tier_bank_name||null,
+    p_tier_label:    b.tier_bank_label||null
+  },"Bank accounts saved");
 }
 
 function setBroadcastMode(m){ state.broadcastMode=m; render() }
@@ -705,8 +802,9 @@ function renderSubmissionsTab(){
     var t=state.tasks.filter(function(x){return x.id===s.task_id})[0];
     var color=s.status==="approved"?"#16a34a":s.status==="rejected"?"#dc2626":"#d97706";
     var dId = u && u.display_id ? u.display_id : (u ? u.id.slice(0,8) : "?");
+    var poolTag = s.used_reserved_slot ? ' <span class="pill" style="background:#7c3aed;font-size:10px;">R</span>' : "";
     return '<div class="row"><div>'+
-      '<strong>'+esc(u?u.name:"?")+'</strong> <span class="mono muted" style="font-size:12px;">'+esc(dId)+'</span> — '+(t?t.category:"?")+' — '+fmtN(s.payout)+
+      '<strong>'+esc(u?u.name:"?")+'</strong> <span class="mono muted" style="font-size:12px;">'+esc(dId)+'</span>'+poolTag+' — '+(t?t.category:"?")+' — '+fmtN(s.payout)+
       '<div class="dim" style="font-size:12px;">elapsed '+(Number(s.elapsed_ms)/1000).toFixed(2)+'s &middot; '+new Date(Number(s.submitted_at)).toLocaleString()+' &middot; <span class="pill" style="background:'+color+';">'+s.status+'</span></div>'+
       (s.reason?'<div class="dim" style="font-size:12px;">'+esc(s.reason)+'</div>':"")+
     '</div>'+
@@ -729,15 +827,37 @@ function renderTasksTab(){
        var canApprove=t.status==="pending_approval";
        var canPause=t.status==="live"||t.status==="paused";
        var canCancel=t.status==="live"||t.status==="paused"||t.status==="pending_approval";
+       var pool = adminPoolInfo(t);
+       var poolLine = "";
+       if(t.premium){
+         if(pool.inWindow){
+           poolLine = '<div class="dim" style="font-size:12px;">'+
+             '<span class="pill" style="background:#7c3aed;font-size:10px;">reserved</span> '+
+             pool.reservedLeft + ' reserved left of ' + pool.reserved + ' &middot; ' +
+             pool.generalLeft + ' general left of ' + pool.general + ' &middot; ' +
+             'window closes in ' + humanizeSeconds(pool.windowSec)+
+             (t.reserved_slots_override != null ? ' &middot; <em>override='+t.reserved_slots_override+'</em>' : '')+
+           '</div>';
+         } else {
+           poolLine = '<div class="dim" style="font-size:12px;">'+
+             '<span class="pill" style="background:#0d9488;font-size:10px;">released</span> '+
+             'all '+ (pool.reservedLeft + pool.generalLeft) + ' remaining slots open to everyone'+
+             (t.reserved_slots_override != null ? ' &middot; <em>override='+t.reserved_slots_override+'</em>' : '')+
+           '</div>';
+         }
+       }
        return '<div class="row"><div>'+
          '<span class="pill" style="background:'+color+';">'+t.category+'</span> '+
          (t.premium?'<span class="pill" style="background:#f59e0b;">★ premium</span> ':'')+
          '<strong>'+fmtN(t.reward)+'</strong> × '+t.quantity+
          '<div class="dim" style="font-size:12px;">'+t.completed+'/'+t.quantity+' done &middot; '+t.status+' &middot; advertiser: '+esc(adv?adv.email:"?")+'</div>'+
          '<div class="dim" style="font-size:12px;">escrow: '+fmtN(t.escrow_remaining||0)+' / '+fmtN(t.escrow_total||t.advertiser_total||0)+'</div>'+
+         poolLine+
        '</div><div style="display:flex;gap:6px;flex-wrap:wrap;">'+
          (canApprove?'<button class="btn btn-sm btn-primary" onclick="approveTask(\''+t.id+'\')">Approve</button>':"")+
          (canPause?'<button class="btn btn-sm btn-ghost" onclick="pauseTask(\''+t.id+'\')">'+(t.status==="paused"?"Resume":"Pause")+'</button>':"")+
+         (t.premium && pool.inWindow ? '<button class="btn btn-sm" style="background:#7c3aed;color:#fff;" onclick="releaseReservedNow(\''+t.id+'\')">Release reserved now</button>' : '')+
+         (t.premium ? '<button class="btn btn-sm btn-ghost" onclick="openTaskReservation(\''+t.id+'\')">Reservation</button>' : '')+
          '<button class="btn btn-sm btn-ghost" onclick="openEditTask(\''+t.id+'\')">Edit</button>'+
          (canCancel?'<button class="btn btn-sm btn-danger" onclick="cancelTask(\''+t.id+'\')">Cancel &amp; refund</button>':"")+
        '</div></div>';
@@ -770,7 +890,7 @@ function renderUsersTab(){
     }).join("") || '<p class="muted">No users match.</p>');
 }
 
-function renderFinanceTab(){
+  function renderFinanceTab(){
   var walletPending=state.walletDeposits.filter(function(w){return w.status==="pending"});
   var walletRest=state.walletDeposits.filter(function(w){return w.status!=="pending"}).slice(0,15);
   var payoutPending=state.payoutMethods.filter(function(p){return p.status==="pending"});
@@ -988,7 +1108,7 @@ function renderSettingsTab(){
     return '<label class="lbl">'+label+'</label><input value="'+esc(bp[key]||"")+'" oninput="updateBankField(\''+key+'\',this.value)" />';
   }
 
-  return '<div class="hero"><h2>Platform settings</h2><p>Everything that controls the marketplace: task days, withdrawal schedule, fee, minimums, bank accounts, support, and tier benefits.</p></div>'+
+  return '<div class="hero"><h2>Platform settings</h2><p>Everything that controls the marketplace: task days, withdrawal schedule, fee, minimums, reservations, bank accounts, support, and tier benefits.</p></div>'+
 
     '<div class="card" style="max-width:none;">'+
       '<div class="settings-section">'+
@@ -1027,6 +1147,43 @@ function renderSettingsTab(){
       '</div>'+
 
       '<div class="settings-section">'+
+        '<h3>Task reservation — global defaults</h3>'+
+        '<p class="hint">Controls how premium tasks split their slots between paid-tier and free-tier workers. Reserved slots unlock to everyone once the window closes.</p>'+
+
+        '<label class="lbl">Default reserved window (hours)</label>'+
+        '<input id="default-reserved-window" type="number" value="'+(state.editDefaultReservedWindow||12)+'" min="0" max="168" />'+
+        '<p class="hint" style="margin-top:-8px;">How long reserved slots stay locked to paid tier on a new premium task. 0 = no reservation. Default: 12.</p>'+
+
+        '<label class="lbl">Minimum reserve floor (slots)</label>'+
+        '<input id="min-reserve-floor" type="number" value="'+(state.editMinReserveFloor||2)+'" min="0" max="100" />'+
+        '<p class="hint" style="margin-top:-8px;">The minimum number of reserved slots on any premium task, even when the paid population is tiny. Default: 2.</p>'+
+
+        '<label class="lbl">Maximum reserve cap (%)</label>'+
+        '<input id="max-reserve-pct" type="number" value="'+(state.editMaxReservePct||50)+'" min="0" max="100" />'+
+        '<p class="hint" style="margin-top:-8px;">Never reserve more than this percent of any task. Free tier always gets at least the rest. Default: 50.</p>'+
+
+        '<div style="background:rgba(20,184,166,.08); border:1px solid rgba(20,184,166,.25); border-radius:10px; padding:12px; margin-top:8px; font-size:13px;">'+
+          '<strong>Current population:</strong> '+
+          (state.users.length) + ' total users, ' +
+          (state.users||[]).filter(function(u){ return u.tier_id && u.tier_id !== "free"; }).length + ' on paid tiers. '+
+          'A 20-slot premium task would reserve <strong>'+
+          (function(){
+            var total = state.users.length;
+            var paid = (state.users||[]).filter(function(u){ return u.tier_id && u.tier_id !== "free"; }).length;
+            if(total === 0 || paid === 0) return 0;
+            var ratio = paid/total;
+            var raw = Math.round(20 * ratio);
+            var floorV = state.editMinReserveFloor||2;
+            var maxPctV = state.editMaxReservePct||50;
+            var r = Math.max(floorV, raw);
+            var cap = Math.floor(20 * maxPctV/100);
+            if(r > cap) r = cap;
+            return r;
+          })()+
+          '</strong> slots for paid tier.</div>'+
+      '</div>'+
+
+      '<div class="settings-section">'+
         '<h3>Default withdrawal amounts</h3>'+
         '<label class="lbl">Minimum — Task (₦)</label><input id="wd-min-task" type="number" value="'+state.editWithdrawMinTask+'" />'+
         '<label class="lbl">Minimum — Affiliate (₦)</label><input id="wd-min-affiliate" type="number" value="'+state.editWithdrawMinAffiliate+'" />'+
@@ -1038,7 +1195,7 @@ function renderSettingsTab(){
 
     '<div class="card" style="max-width:none; margin-top:20px;">'+
       '<h2 style="margin-top:0;">Platform bank accounts</h2>'+
-      '<p class="muted" style="font-size:13px;">These are the accounts users see when funding their wallet or paying for a tier upgrade. Changing them updates the user side immediately.</p>'+
+      '<p class="muted" style="font-size:13px;">These are the accounts users see when funding their wallet or paying for a tier upgrade.</p>'+
 
       '<h3 style="margin-top:18px;">Wallet funding account</h3>'+
       bfield("wallet_bank_number","Account number")+
@@ -1074,41 +1231,33 @@ function renderSettingsTab(){
               '<div>Multiplier</div><div>'+
                 '<input type="number" step="0.01" min="1.00" max="1.25" value="'+esc(b.multiplier)+'" oninput="updateTB(\''+b.tier_id+'\',\'multiplier\',Number(this.value))" style="margin:0;" />'+
               '</div>'+
-
               '<div>Referral %</div><div>'+
                 '<input type="number" step="0.001" min="0" max="0.1" value="'+esc(b.referral_pct)+'" oninput="updateTB(\''+b.tier_id+'\',\'referral_pct\',Number(this.value))" style="margin:0;" />'+
               '</div>'+
-
               '<div>Min withdrawal — Task (₦)</div><div>'+
                 '<input type="number" value="'+esc(b.withdraw_min_task)+'" oninput="updateTB(\''+b.tier_id+'\',\'withdraw_min_task\',Number(this.value))" style="margin:0;" />'+
               '</div>'+
-
               '<div>Min withdrawal — Affiliate (₦)</div><div>'+
                 '<input type="number" value="'+esc(b.withdraw_min_affiliate)+'" oninput="updateTB(\''+b.tier_id+'\',\'withdraw_min_affiliate\',Number(this.value))" style="margin:0;" />'+
               '</div>'+
-
               '<div>Withdrawal fee (%)</div><div>'+
                 '<input type="number" step="1" min="0" max="50" value="'+Math.round(Number(b.withdraw_fee_pct)*100)+'" oninput="updateTB(\''+b.tier_id+'\',\'withdraw_fee_pct\',Number(this.value)/100)" style="margin:0;" />'+
               '</div>'+
-
               '<div>Support SLA (hours)</div><div>'+
                 '<input type="number" value="'+esc(b.support_sla_hours)+'" oninput="updateTB(\''+b.tier_id+'\',\'support_sla_hours\',Number(this.value))" style="margin:0;" />'+
               '</div>'+
-
               '<div>Monthly incentive cap</div><div>'+
                 '<input type="number" value="'+esc(b.monthly_incentive_cap)+'" oninput="updateTB(\''+b.tier_id+'\',\'monthly_incentive_cap\',Number(this.value))" style="margin:0;" />'+
               '</div>'+
-
               '<div>Premium access</div><div>'+
                 '<button class="day-btn '+((b.premium_access)?'allowed':'blocked')+'" onclick="updateTB(\''+b.tier_id+'\',\'premium_access\','+(!b.premium_access?'true':'false')+')">'+(b.premium_access?'ON':'OFF')+'</button>'+
               '</div>'+
-
               '<div>Premium tasks first</div><div>'+
                 '<button class="day-btn '+((b.premium_first)?'allowed':'blocked')+'" onclick="updateTB(\''+b.tier_id+'\',\'premium_first\','+(!b.premium_first?'true':'false')+')">'+(b.premium_first?'ON':'OFF')+'</button>'+
               '</div>'+
             '</div>'+
 
-            '<label class="lbl" style="margin-top:8px; display:block;">Task withdrawal days (click a weekday or a day-of-month)</label>'+
+            '<label class="lbl" style="margin-top:8px; display:block;">Task withdrawal days (weekday or day-of-month)</label>'+
             '<div>'+
               (function(){
                 var arr = (b.withdraw_task_days||[]);
@@ -1174,7 +1323,7 @@ function renderSettingsTab(){
       '<input type="number" value="'+esc(sp.response_time_hours||24)+'" oninput="updateSupportField(\'response_time_hours\',this.value)" min="1" />'+
 
       '<label class="lbl">Support note (optional)</label>'+
-      '<input value="'+esc(sp.support_note||"")+'" oninput="updateSupportField(\'support_note\',this.value)" placeholder="e.g. Mon-Fri, 9am-6pm WAT. Replies within 24 hours." />'+
+      '<input value="'+esc(sp.support_note||"")+'" oninput="updateSupportField(\'support_note\',this.value)" placeholder="e.g. Mon-Fri, 9am-6pm WAT." />'+
 
       '<button class="btn btn-primary btn-full" onclick="saveSupport()">Save support contacts</button>'+
     '</div>';
@@ -1232,7 +1381,7 @@ function renderUserDetailModal(id){
           '<div>Min task withdrawal</div><div>'+fmtN(tb.withdraw_min_task)+'</div>'+
           '<div>Min affiliate withdrawal</div><div>'+fmtN(tb.withdraw_min_affiliate)+'</div>'+
           '<div>Premium access</div><div>'+(tb.premium_access?'Yes':'No')+'</div>'+
-          '<div>Monthly cap</div><div>'+tb.monthly_incentive_cap+' incentivized completions</div>'+
+          '<div>Monthly cap</div><div>'+tb.monthly_incentive_cap+' completions</div>'+
         '</div>':"")+
       '<h3 style="margin-top:18px;">Referrals made ('+referrals.length+')</h3>'+
       (referrals.length===0?'<p class="muted">None.</p>':referrals.slice(0,10).map(function(r){
@@ -1273,6 +1422,32 @@ function renderModal(){
   if(!state.modal) return "";
   var m=state.modal;
   if(m.type==="userDetail") return renderUserDetailModal(m.id);
+  if(m.type==="reservation"){
+    var tr=state.tasks.filter(function(x){return x.id===m.id})[0];
+    if(!tr){state.modal=null;return ""}
+    var poolNow = adminPoolInfo(tr);
+    var currentWin = taskReservedWindowHours(tr);
+    return '<div class="modal-scrim" onclick="if(event.target===this)closeModal()"><div class="modal" style="max-width:560px;">'+
+      '<div class="modal-head"><strong>Reservation — '+esc(tr.category)+'</strong><button class="modal-close" onclick="closeModal()">×</button></div>'+
+      '<div class="modal-body">'+
+        '<div class="kv"><div>Task ID</div><div class="mono" style="word-break:break-all;font-size:12px;">'+esc(tr.id)+'</div></div>'+
+        '<div class="kv">'+
+          '<div>Quantity</div><div>'+tr.quantity+'</div>'+
+          '<div>Completed</div><div>'+tr.completed+'</div>'+
+          '<div>Auto-computed reserve</div><div>'+adminComputeReserve(Object.assign({},tr,{reserved_slots_override:null}))+' slots</div>'+
+          '<div>Current pool</div><div>'+(poolNow.inWindow?('reserved window active — '+poolNow.reservedLeft+' reserved left, '+poolNow.generalLeft+' general left'):'released — '+((poolNow.reservedLeft+poolNow.generalLeft))+' slots open to everyone')+'</div>'+
+          '<div>Window closes in</div><div>'+(poolNow.inWindow?humanizeSeconds(poolNow.windowSec):'—')+'</div>'+
+        '</div>'+
+        '<label class="lbl">Reserved window (hours)</label>'+
+        '<input id="rv-window" type="number" min="0" max="168" value="'+currentWin+'" />'+
+        '<p class="hint" style="margin-top:-8px; font-size:12px; color:var(--muted);">0 = release immediately. 12 = default. 24+ = longer exclusive window.</p>'+
+        '<label class="lbl">Force reserved slot count (optional)</label>'+
+        '<input id="rv-override" type="number" min="0" placeholder="Leave blank to use auto-computed value" value="'+(tr.reserved_slots_override != null ? tr.reserved_slots_override : '')+'" />'+
+        '<p class="hint" style="margin-top:-8px; font-size:12px; color:var(--muted);">Overrides the automatic paid-population formula. Leave blank to compute live.</p>'+
+      '</div>'+
+      '<div class="modal-foot"><button class="btn btn-ghost" onclick="closeModal()">Cancel</button><button class="btn btn-primary" onclick="saveTaskReservation()">Save</button></div>'+
+    '</div></div>';
+  }
   if(m.type==="user"){
     var u=state.users.filter(function(x){return x.id===m.id})[0];
     if(!u){state.modal=null;return ""}
@@ -1375,3 +1550,4 @@ function render(){
 </script>
 </body>
 </html>
+  

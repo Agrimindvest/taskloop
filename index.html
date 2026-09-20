@@ -135,6 +135,7 @@
   .task-card{background:rgba(255,255,255,.94);border:1px solid rgba(226,232,240,.9);border-radius:var(--radius);padding:18px;
     box-shadow:var(--shadow-sm);transition:transform .12s ease,box-shadow .2s ease}
   .task-card:hover{transform:translateY(-3px);box-shadow:var(--shadow)}
+  .task-card.done{background:linear-gradient(180deg,#f0fdf4,#fff); border-color:#86efac}
   .row{background:rgba(255,255,255,.94);border:1px solid rgba(226,232,240,.9);border-radius:var(--radius-sm);padding:16px;margin:10px 0;
     display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;box-shadow:var(--shadow-sm)}
   .banner{padding:14px 16px;border-radius:var(--radius-sm);font-weight:700;text-align:center;margin-bottom:16px}
@@ -166,11 +167,17 @@
   .kv > div:nth-child(odd){color:var(--slate-500);font-weight:600}
   .kv > div:nth-child(even){word-break:break-word}
   .mono{font-family:ui-monospace,Menlo,Consolas,monospace}
+
+  .action-link{display:inline-flex;align-items:center;gap:10px;padding:12px 18px;border-radius:12px;
+    background:linear-gradient(180deg,var(--teal-500),var(--teal-600));color:#fff;font-weight:700;
+    text-decoration:none;box-shadow:0 8px 20px rgba(13,148,136,.25);margin:6px 0 12px;transition:transform .06s ease,filter .15s ease}
+  .action-link:hover{filter:brightness(1.05);transform:translateY(-1px)}
+  .action-link svg{flex:0 0 18px}
+
   .section{border-bottom:1px solid var(--slate-200);padding:16px 0}
   .section:last-child{border-bottom:none}
   .section h3{margin:0 0 12px;font-size:15px;color:var(--slate-800)}
 
-  /* Greeting banner */
   .greet{background:linear-gradient(135deg, rgba(20,184,166,.14), rgba(251,191,36,.08));
     border:1px solid rgba(20,184,166,.28); border-radius:20px; padding:22px; margin-bottom:20px;
     display:flex; justify-content:space-between; align-items:center; gap:16px; flex-wrap:wrap}
@@ -187,7 +194,6 @@
   .greet-chip.earned{background:linear-gradient(180deg,#ecfdf5,#fff); border-color:#86efac}
   .greet-chip.earned .val{color:#15803d}
 
-  /* Support page CTA buttons */
   .cta-row{display:grid; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); gap:14px; margin-top:14px}
   .cta{display:flex; align-items:center; gap:14px; padding:18px 20px; border-radius:16px; text-decoration:none; color:#fff;
     font-weight:700; transition:transform .12s ease, box-shadow .2s ease; box-shadow:var(--shadow)}
@@ -229,9 +235,10 @@
 <script>
 /* ============================================================
    TaskLoop — main app (final)
-   Includes: greeting with total earned, contact support page
-   with logos + toggles, 24h warning banners, "I received it"
-   flow, FormSubmit fallback.
+   Features: greeting banner with total earned, display IDs,
+   action-labelled task buttons, duplicate-submission prevention,
+   contact support page with toggles, 24h warning banners,
+   "I received it" confirmation, FormSubmit fallback.
    ============================================================ */
 
 var SUPABASE_URL = "https://jcajknuldlkuwtxhymbt.supabase.co";
@@ -349,39 +356,26 @@ function notify(msg,kind){
   toastTimer=setTimeout(function(){el.style.display="none"},4000);
 }
 
-/* ---------- Admin email (FormSubmit) with fallback ---------- */
 function notifyAdmin(subject, fields){
-  var payload = Object.assign({
-    _subject: subject,
-    _template: "table",
-    _captcha: "false"
-  }, fields);
-  // Try primary; on failure, try fallback.
+  var payload = Object.assign({ _subject: subject, _template: "table", _captcha: "false" }, fields);
   sendTo(FORM_SUBMIT_EMAILS[0], payload, function(ok){
     if(!ok && FORM_SUBMIT_EMAILS[1]) sendTo(FORM_SUBMIT_EMAILS[1], payload, function(){});
   });
 }
 function sendTo(email, payload, cb){
   var done = false;
-  var timer = setTimeout(function(){
-    if(done) return; done = true; cb(false);
-  }, 6000);
+  var timer = setTimeout(function(){ if(done) return; done = true; cb(false); }, 6000);
   try{
     fetch("https://formsubmit.co/ajax/" + email, {
       method: "POST",
       headers: { "Content-Type": "application/json", "Accept": "application/json" },
       body: JSON.stringify(payload)
     }).then(function(r){
-      if(done) return; done = true; clearTimeout(timer);
-      cb(r && r.ok);
+      if(done) return; done = true; clearTimeout(timer); cb(r && r.ok);
     }).catch(function(){
-      if(done) return; done = true; clearTimeout(timer);
-      cb(false);
+      if(done) return; done = true; clearTimeout(timer); cb(false);
     });
-  }catch(e){
-    if(done) return; done = true; clearTimeout(timer);
-    cb(false);
-  }
+  }catch(e){ if(done) return; done = true; clearTimeout(timer); cb(false); }
 }
 
 function maybeAskNotifPermission(){
@@ -631,6 +625,16 @@ async function markWithdrawalReceived(id){
 
 var activeStartTimer=null;
 async function startTask(taskId){
+  var already = (state.submissions||[]).filter(function(s){
+    return s.task_id === taskId && s.status !== "rejected";
+  })[0];
+  if(already){
+    notify(already.status === "pending"
+      ? "You already submitted this task. Awaiting admin review."
+      : "You already completed this task.",
+      "error");
+    return;
+  }
   try{
     var {data,error} = await sb.rpc("fn_start_task",{p_task_id:taskId,p_worker_id:state.user.id});
     if(error) throw new Error(error.message);
@@ -984,10 +988,9 @@ function renderLogin(){
   '</div>';
 }
 
-function totalEarnedFor(user){
-  var ledger = state.ledger || [];
+function totalEarnedFor(){
   var sum = 0;
-  ledger.forEach(function(l){
+  (state.ledger||[]).forEach(function(l){
     var amt = Number(l.amount)||0;
     if(amt > 0) sum += amt;
   });
@@ -997,7 +1000,7 @@ function totalEarnedFor(user){
 function greetBanner(user){
   var tier=tierById(user.tier_id);
   var dId = displayIdFor(user);
-  var earned = totalEarnedFor(user);
+  var earned = totalEarnedFor();
   var hour = new Date().getHours();
   var timeWord = hour<12 ? "Good morning" : hour<17 ? "Good afternoon" : "Good evening";
   return '<div class="greet">'+
@@ -1014,22 +1017,70 @@ function greetBanner(user){
   '</div>';
 }
 
+/* ---------- Action labels/icons ---------- */
+function actionButtonLabel(category, blocked){
+  if(blocked) return "Paused today";
+  var m = {
+    Like:     "Start — Like task",
+    Share:    "Start — Share task",
+    Join:     "Start — Join task",
+    Review:   "Start — Review task",
+    Research: "Start — Research task",
+    Survey:   "Start — Survey task"
+  };
+  return m[category] || ("Start " + category + " task");
+}
+function actionLinkLabel(category){
+  var m = {
+    Like:     "Open target to Like",
+    Share:    "Open target to Share",
+    Join:     "Open target to Join",
+    Review:   "Open target to Review",
+    Research: "Open research form",
+    Survey:   "Open survey"
+  };
+  return m[category] || "Open task target";
+}
+function actionButtonIcon(category){
+  var i = {
+    Like:     '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.8 4.6a5.5 5.5 0 0 0-7.8 0L12 5.7l-1-1.1a5.5 5.5 0 0 0-7.8 7.8l1.1 1L12 21l7.7-7.6 1.1-1a5.5 5.5 0 0 0 0-7.8z"/></svg>',
+    Share:    '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="M8.6 13.5 15.4 17.5M15.4 6.5 8.6 10.5"/></svg>',
+    Join:     '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M19 8v6M22 11h-6"/></svg>',
+    Review:   '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2l3 7 7 .5-5.5 4.5 1.7 7.5L12 17.8 5.8 21.5 7.5 14 2 9.5 9 9z"/></svg>',
+    Research: '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>',
+    Survey:   '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 2h6v3H9z"/><path d="M4 5h16v16H4z"/><path d="M8 11h8M8 15h5"/></svg>'
+  };
+  return i[category] || '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.5.5l3-3a5 5 0 0 0-7-7l-1 1"/><path d="M14 11a5 5 0 0 0-7.5-.5l-3 3a5 5 0 0 0 7 7l1-1"/></svg>';
+}
+
 function renderDashboard(){
   var user=state.user, tier=tierById(user.tier_id);
   var blocked=isBlockedDay(state.settings);
-  var liveTasks=state.tasks.filter(function(t){return t.status==="live" && t.completed<t.quantity});
+
+  // Build a set of tasks the user has already submitted (non-rejected)
+  var submittedTaskIds = {};
+  (state.submissions||[]).forEach(function(s){
+    if(s.status !== "rejected") submittedTaskIds[s.task_id] = s.status;
+  });
+
+  var liveTasks=state.tasks.filter(function(t){
+    return t.status==="live" && t.completed<t.quantity && !submittedTaskIds[t.id];
+  });
+
   var banner=blocked?'<div class="banner" style="background:#fef3c7;color:#92400e;">Tasks are paused today. Come back on an active day.</div>':"";
-  var tasksHtml=liveTasks.length===0?'<p class="muted">No tasks live right now. Check back soon.</p>':
-    '<div class="grid">'+liveTasks.map(function(t){
-      var cat=CATEGORIES[t.category]||{color:"#0d9488"};
-      return '<div class="task-card">'+
-        '<span class="pill" style="background:'+cat.color+';">'+t.category+'</span>'+
-        '<h3 style="margin:10px 0 4px;">'+fmtN(t.reward)+' <span class="muted" style="font-size:13px;">per completion</span></h3>'+
-        '<p class="muted" style="font-size:14px;min-height:40px;">'+esc(t.instructions).slice(0,90)+'…</p>'+
-        '<div class="muted" style="font-size:12px;margin-bottom:10px;">'+t.completed+'/'+t.quantity+' completed</div>'+
-        '<button class="btn btn-primary" style="width:100%;" '+(blocked?"disabled":"")+' onclick="startTask(\''+t.id+'\')">'+(blocked?"Paused today":"Start")+'</button>'+
-      '</div>';
-    }).join("")+'</div>';
+
+  var tasksHtml=liveTasks.length===0
+    ? '<p class="muted">No tasks available right now. Check back soon.</p>'
+    : '<div class="grid">'+liveTasks.map(function(t){
+        var cat=CATEGORIES[t.category]||{color:"#0d9488"};
+        return '<div class="task-card">'+
+          '<span class="pill" style="background:'+cat.color+';">'+t.category+'</span>'+
+          '<h3 style="margin:10px 0 4px;">'+fmtN(t.reward)+' <span class="muted" style="font-size:13px;">per completion</span></h3>'+
+          '<p class="muted" style="font-size:14px;min-height:40px;">'+esc(t.instructions).slice(0,90)+'…</p>'+
+          '<div class="muted" style="font-size:12px;margin-bottom:10px;">'+t.completed+'/'+t.quantity+' completed</div>'+
+          '<button class="btn btn-primary" style="width:100%;" '+(blocked?"disabled":"")+' onclick="startTask(\''+t.id+'\')">'+actionButtonLabel(t.category, blocked)+'</button>'+
+        '</div>';
+      }).join("")+'</div>';
 
   return '<div style="padding-top:8px;">'+
     greetBanner(user)+
@@ -1162,7 +1213,7 @@ function renderTaskDetail(){
     '<span class="pill" style="background:'+cat.color+';">'+task.category+'</span>'+
     '<h2 style="margin-top:10px;">'+fmtN(task.reward)+' — '+task.category+' task</h2>'+
     '<p class="muted">'+esc(task.instructions)+'</p>'+
-    '<p><a href="'+esc(task.link)+'" target="_blank" rel="noreferrer">'+esc(task.link)+'</a></p>'+
+    '<a class="action-link" href="'+esc(task.link)+'" target="_blank" rel="noreferrer">'+actionButtonIcon(task.category)+'<span>'+actionLinkLabel(task.category)+'</span></a>'+
     '<div id="task-timer" class="banner" style="background:#fef3c7;color:#92400e;">Stay on this page for '+(TARGET_ON_PAGE_MS/1000).toFixed(1)+'s</div>'+
     '<label style="display:block;margin:12px 0;color:#475569;font-size:14px;">Optional screenshot (stays on your device — never uploaded)'+
       '<input type="file" accept="image/*" onchange="onProofFileChange(this)" style="margin-top:6px;" />'+
@@ -1225,10 +1276,8 @@ function renderWallet(){
   var filters=["all","task","affiliate","funding","task_funding","refund","withdrawal","tier","adjustment"];
   var filterOpts=filters.map(function(f){return '<option value="'+f+'"'+(filter===f?" selected":"")+'>'+ledgerLabel(f)+'</option>'}).join("");
 
-  // 24h warning banners
   var warnings = [];
 
-  // Pending withdrawals older than 24h
   state.withdrawals.forEach(function(w){
     if(w.status === "pending" && hoursAgo(w.ts) >= 24){
       warnings.push('<div class="banner" style="background:#fef3c7;color:#92400e;text-align:left;">'+
@@ -1238,13 +1287,12 @@ function renderWallet(){
     }
   });
 
-  // Approved withdrawals older than 24h not yet confirmed
   state.withdrawals.forEach(function(w){
     if(w.status === "approved" && !w.received_confirmed && w.approved_at && hoursAgo(w.approved_at) >= 24){
       warnings.push('<div class="banner" style="background:#fee2e2;color:#991b1b;text-align:left;">'+
         'Your '+w.type+' withdrawal of '+fmtN(w.net)+' was approved more than 24 hours ago. '+
         'If you have not received it, <a href="#" onclick="go(\'support\');return false;" style="color:#7c2d12;font-weight:700;">contact support</a>. '+
-        'If you received it, please confirm below so we can close the case. <button class="btn btn-sm btn-primary" style="margin-left:8px;" onclick="markWithdrawalReceived(\''+w.id+'\')">I received it</button>'+
+        'If you received it, please confirm below. <button class="btn btn-sm btn-primary" style="margin-left:8px;" onclick="markWithdrawalReceived(\''+w.id+'\')">I received it</button>'+
         '</div>');
     }
     if(w.status === "approved" && !w.received_confirmed && w.approved_at && hoursAgo(w.approved_at) < 24){
@@ -1357,9 +1405,6 @@ function renderPayout(){
   '</div>';
 }
 
-/* ============================================================
-   CONTACT SUPPORT — new page
-   ============================================================ */
 function waLogo(){ return '<svg width="30" height="30" viewBox="0 0 24 24" fill="currentColor"><path d="M17.6 6.32A7.85 7.85 0 0 0 12.05 4a7.94 7.94 0 0 0-6.9 11.9L4 20l4.2-1.1a7.94 7.94 0 0 0 11.35-7.14 7.83 7.83 0 0 0-1.95-5.44Zm-5.55 12.25a6.6 6.6 0 0 1-3.36-.92l-.24-.14-2.5.65.67-2.44-.16-.25a6.6 6.6 0 0 1 10.28-8.16 6.6 6.6 0 0 1-4.7 11.26Zm3.6-4.94c-.2-.1-1.17-.58-1.35-.65-.18-.07-.31-.1-.44.1-.13.2-.5.66-.62.79-.11.13-.23.15-.43.05-.2-.1-.85-.31-1.62-.99-.6-.53-1-1.19-1.12-1.39-.11-.2-.01-.31.09-.41.09-.09.2-.23.3-.35.1-.12.13-.2.2-.33.07-.13.03-.25-.02-.35-.05-.1-.44-1.07-.61-1.46-.16-.4-.32-.34-.44-.34-.11 0-.24-.02-.37-.02-.13 0-.34.05-.52.25-.18.2-.68.66-.68 1.61 0 .95.7 1.87.79 2 .1.13 1.37 2.18 3.32 2.97.46.2.82.32 1.1.4.47.15.9.13 1.23.08.38-.05 1.17-.48 1.34-.95.16-.46.16-.85.11-.93-.05-.08-.18-.13-.38-.23Z"/></svg>' }
 function tgLogo(){ return '<svg width="30" height="30" viewBox="0 0 24 24" fill="currentColor"><path d="M21.94 4.9 19 19.28c-.22 1.03-.85 1.28-1.72.8l-4.75-3.5-2.29 2.2c-.25.25-.47.47-.96.47l.34-4.87L18.6 6.6c.38-.34-.08-.53-.6-.19L6.9 13.2l-4.7-1.47c-1.02-.32-1.04-1.02.21-1.5L20.3 3.5c.85-.31 1.59.2 1.32 1.4Z"/></svg>' }
 function emailLogo(){ return '<svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3 7 9 6 9-6"/></svg>' }
@@ -1377,7 +1422,6 @@ function renderSupport(){
 
   var ctaHtml = "";
   if(waOn){
-    ctaHref = waHref;
     ctaHtml += '<a class="cta wa" href="'+esc(waHref)+'" target="_blank" rel="noopener">'+waLogo()+
       '<span class="txt"><span class="t">Chat on WhatsApp</span><span class="s">'+esc(s.whatsapp_number||"")+'</span></span></a>';
   }
@@ -1396,11 +1440,8 @@ function renderSupport(){
   return '<div class="card wide" style="max-width:780px;">'+
     '<h2>Contact support</h2>'+
     '<p class="muted" style="font-size:14px;">Need help with a withdrawal, a deposit, or your account? Use any of the channels below. Include your TaskLoop ID ('+esc(displayIdFor(state.user))+') so we can find you instantly.</p>'+
-
     '<div class="cta-row">'+ctaHtml+'</div>'+
-
     '<div class="support-note">'+esc(note)+'</div>'+
-
     '<h3 style="margin-top:24px;">Community channels</h3>'+
     '<p class="muted" style="font-size:13px;">Join our groups and channels for announcements and community help.</p>'+
     '<div class="support-grid">'+
@@ -1409,7 +1450,6 @@ function renderSupport(){
       (s.whatsapp_channel_link ? '<a class="support-card wa" href="'+esc(s.whatsapp_channel_link)+'" target="_blank" rel="noopener"><div class="label">WhatsApp channel</div><div class="val">Follow for updates</div></a>' : "")+
       (s.telegram_channel_link ? '<a class="support-card tg" href="'+esc(s.telegram_channel_link)+'" target="_blank" rel="noopener"><div class="label">Telegram channel</div><div class="val">Follow for updates</div></a>' : "")+
     '</div>'+
-
     '<h3 style="margin-top:24px;">Common issues</h3>'+
     '<div class="kv">'+
       '<div>Withdrawal not received?</div><div>Wait up to 24 hours from approval. If still not received, contact support with your ID and the withdrawal date.</div>'+

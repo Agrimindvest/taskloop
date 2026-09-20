@@ -135,7 +135,7 @@
   .task-card{background:rgba(255,255,255,.94);border:1px solid rgba(226,232,240,.9);border-radius:var(--radius);padding:18px;
     box-shadow:var(--shadow-sm);transition:transform .12s ease,box-shadow .2s ease}
   .task-card:hover{transform:translateY(-3px);box-shadow:var(--shadow)}
-  .task-card.done{background:linear-gradient(180deg,#f0fdf4,#fff); border-color:#86efac}
+  .task-card.premium-task{border-color:#fbbf24; background:linear-gradient(180deg,#fffbeb,#fff)}
   .row{background:rgba(255,255,255,.94);border:1px solid rgba(226,232,240,.9);border-radius:var(--radius-sm);padding:16px;margin:10px 0;
     display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;box-shadow:var(--shadow-sm)}
   .banner{padding:14px 16px;border-radius:var(--radius-sm);font-weight:700;text-align:center;margin-bottom:16px}
@@ -234,11 +234,7 @@
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script>
 /* ============================================================
-   TaskLoop — main app (final)
-   Features: greeting banner with total earned, display IDs,
-   action-labelled task buttons, duplicate-submission prevention,
-   contact support page with toggles, 24h warning banners,
-   "I received it" confirmation, FormSubmit fallback.
+   TaskLoop — main app (final, with Step D)
    ============================================================ */
 
 var SUPABASE_URL = "https://jcajknuldlkuwtxhymbt.supabase.co";
@@ -277,6 +273,23 @@ function displayIdFor(user){
 }
 function hoursAgo(ts){ return (Date.now()-Number(ts))/3600000; }
 
+function premiumReservationInfo(task){
+  if(!task || !task.premium) return { reserved: false, secondsLeft: 0 };
+  var created = Number(task.created_at || 0);
+  if(!created) return { reserved: false, secondsLeft: 0 };
+  var RESERVE_MS = 24*3600*1000;
+  var elapsed = Date.now() - created;
+  if(elapsed >= RESERVE_MS) return { reserved: false, secondsLeft: 0 };
+  return { reserved: true, secondsLeft: Math.floor((RESERVE_MS - elapsed)/1000) };
+}
+function humanizeSeconds(s){
+  if(s <= 0) return "now";
+  var h = Math.floor(s/3600);
+  var m = Math.floor((s%3600)/60);
+  if(h > 0) return h + "h " + m + "m";
+  return m + "m";
+}
+
 function isBlockedDay(settings){
   if(!settings) return false;
   var d=new Date(); var dow=d.getDay();
@@ -285,9 +298,14 @@ function isBlockedDay(settings){
   if(settings.blocked_dates && settings.blocked_dates.indexOf(today)!==-1) return true;
   return false;
 }
-function nextWithdrawDate(type, settings){
-  if(!settings) return "—";
-  var arr = type==="task" ? settings.withdraw_task_days : settings.withdraw_affiliate_days;
+function nextWithdrawDate(type, settings, tierBenefit){
+  var arr = null;
+  if(tierBenefit){
+    arr = type==="task" ? tierBenefit.withdraw_task_days : tierBenefit.withdraw_affiliate_days;
+  }
+  if(!arr && settings){
+    arr = type==="task" ? settings.withdraw_task_days : settings.withdraw_affiliate_days;
+  }
   if(!arr || !arr.length) return "—";
   var allDow = true;
   for(var i=0;i<arr.length;i++) if(arr[i]>6) allDow=false;
@@ -299,9 +317,14 @@ function nextWithdrawDate(type, settings){
   }
   return "—";
 }
-function isWithdrawDayToday(type, settings){
-  if(!settings) return true;
-  var arr = type==="task" ? settings.withdraw_task_days : settings.withdraw_affiliate_days;
+function isWithdrawDayToday(type, settings, tierBenefit){
+  var arr = null;
+  if(tierBenefit){
+    arr = type==="task" ? tierBenefit.withdraw_task_days : tierBenefit.withdraw_affiliate_days;
+  }
+  if(!arr && settings){
+    arr = type==="task" ? settings.withdraw_task_days : settings.withdraw_affiliate_days;
+  }
   if(!arr || !arr.length) return true;
   var today = new Date();
   var allDow = true;
@@ -334,6 +357,7 @@ var state = {
   tasks: [], submissions: [], ledger: [], notifications: [],
   withdrawals: [],
   settings: null, payoutMethods: [], support: null, referrals: [],
+  tierBenefits: [],
   route: "loading",
   activeStart: null,
   upgradeStage: "select", upgradeTierId: "starter",
@@ -345,6 +369,12 @@ var state = {
   _lastNotifId: null,
   _askedNotifPerm: false
 };
+
+function myTierBenefit(){
+  if(!state.user) return null;
+  var tid = state.user.tier_id || "free";
+  return (state.tierBenefits||[]).filter(function(b){return b.tier_id===tid})[0] || null;
+}
 
 var toastTimer=null;
 function notify(msg,kind){
@@ -590,12 +620,18 @@ async function loadSupport(){
     state.support = data||null;
   }catch(e){ state.support=null }
 }
+async function loadTierBenefits(){
+  try{
+    var {data} = await sb.from("tier_benefits").select("*");
+    state.tierBenefits = data||[];
+  }catch(e){ state.tierBenefits=[] }
+}
 async function refreshAll(){
   await loadUser();
   await Promise.all([
     loadTasks(), loadSubmissions(), loadLedger(), loadWithdrawals(),
     loadNotifications(), loadSettings(), loadPayoutMethods(),
-    loadSupport(), loadReferrals()
+    loadSupport(), loadReferrals(), loadTierBenefits()
   ]);
 }
 
@@ -677,15 +713,17 @@ async function submitTask(){
 async function requestWithdrawal(){
   var type=state.wdType||"task";
   var amount=Number(document.getElementById("wd-amount").value);
-  var min = type==="task" ? Number((state.settings&&state.settings.withdraw_min_task)||10000)
-                          : Number((state.settings&&state.settings.withdraw_min_affiliate)||1000);
+  var tb = myTierBenefit();
+  var min = type==="task"
+    ? Number((tb && tb.withdraw_min_task) || (state.settings&&state.settings.withdraw_min_task) || 10000)
+    : Number((tb && tb.withdraw_min_affiliate) || (state.settings&&state.settings.withdraw_min_affiliate) || 1000);
   if(!amount||amount<min){notify("Minimum is "+fmtN(min),"error");return}
   var bf=type==="task"?"task_balance":"affiliate_balance";
   if(Number(state.user[bf])<amount){notify("Insufficient balance","error");return}
   try{
     var {data,error} = await sb.rpc("fn_request_withdrawal",{p_user_id:state.user.id,p_type:type,p_amount:amount});
     if(error) throw new Error(error.message);
-    var feePct  = Number((state.settings&&state.settings.withdraw_fee_pct)||0.2);
+    var feePct  = Number((tb && tb.withdraw_fee_pct) || (state.settings&&state.settings.withdraw_fee_pct) || 0.2);
     var feeAmt  = Math.round(amount*feePct);
     notifyAdmin("New withdrawal request", {
       type: "Withdrawal — " + type + " earnings",
@@ -942,7 +980,7 @@ function renderLanding(){
   var steps=[
     ["Pick a task","Browse by category — Like, Share, Join, Review, Research, Survey."],
     ["Complete it","Stay on the page at least 4 seconds. Submit — timing is verified server-side."],
-    ["Get paid","Approved earnings land in your wallet. Withdraw on schedule. 20% fee applies."]
+    ["Get paid","Approved earnings land in your wallet. Withdraw on schedule. Fee applies per your tier."]
   ];
   var stepsHtml=steps.map(function(p,i){
     return '<div class="step-card"><div class="num">'+(i+1)+'</div><h3 style="margin:0 0 6px;">'+p[0]+'</h3><p class="muted" style="margin:0;">'+p[1]+'</p></div>';
@@ -1057,24 +1095,56 @@ function renderDashboard(){
   var user=state.user, tier=tierById(user.tier_id);
   var blocked=isBlockedDay(state.settings);
 
-  // Build a set of tasks the user has already submitted (non-rejected)
   var submittedTaskIds = {};
   (state.submissions||[]).forEach(function(s){
     if(s.status !== "rejected") submittedTaskIds[s.task_id] = s.status;
   });
 
-  var liveTasks=state.tasks.filter(function(t){
-    return t.status==="live" && t.completed<t.quantity && !submittedTaskIds[t.id];
+  var isPaid = user.tier_id && user.tier_id !== "free";
+  var isExec = user.tier_id === "executive";
+
+  var liveTasks = state.tasks.filter(function(t){
+    if(t.status !== "live") return false;
+    if(t.completed >= t.quantity) return false;
+    if(submittedTaskIds[t.id]) return false;
+    // Premium tasks are paid-tier only
+    if(!isPaid && t.premium) return false;
+    return true;
   });
 
-  var banner=blocked?'<div class="banner" style="background:#fef3c7;color:#92400e;">Tasks are paused today. Come back on an active day.</div>':"";
+  if(isExec){
+    liveTasks.sort(function(a,b){
+      var ap = a.premium ? 1 : 0;
+      var bp = b.premium ? 1 : 0;
+      if(ap !== bp) return bp - ap;
+      return Number(b.created_at||0) - Number(a.created_at||0);
+    });
+  }
+
+  var banner = blocked
+    ? '<div class="banner" style="background:#fef3c7;color:#92400e;">Tasks are paused today. Come back on an active day.</div>'
+    : "";
+
+  var premiumCount = state.tasks.filter(function(t){
+    return t.status==="live" && t.completed<t.quantity && t.premium;
+  }).length;
+  if(!blocked && !isPaid && premiumCount > 0){
+    banner += '<div class="banner" style="background:#eef2ff;color:#3730a3;text-align:left;">'+
+      '<strong>'+premiumCount+' premium task'+(premiumCount===1?'':'s')+'</strong> '+
+      'are available only to Starter tier and above. '+
+      '<a href="#" onclick="go(\'upgrade\');return false;" style="color:#4338ca;font-weight:700;">Upgrade to unlock →</a>'+
+      '</div>';
+  }
 
   var tasksHtml=liveTasks.length===0
     ? '<p class="muted">No tasks available right now. Check back soon.</p>'
     : '<div class="grid">'+liveTasks.map(function(t){
         var cat=CATEGORIES[t.category]||{color:"#0d9488"};
-        return '<div class="task-card">'+
+        var rinfo = premiumReservationInfo(t);
+        return '<div class="task-card'+(t.premium?' premium-task':'')+'">'+
           '<span class="pill" style="background:'+cat.color+';">'+t.category+'</span>'+
+          (t.premium?' <span class="pill" style="background:#f59e0b;">★ PREMIUM</span>':'')+
+          (t.premium && isPaid && rinfo.reserved ? ' <span class="pill" style="background:#7c3aed;">reserved · '+humanizeSeconds(rinfo.secondsLeft)+'</span>' : '')+
           '<h3 style="margin:10px 0 4px;">'+fmtN(t.reward)+' <span class="muted" style="font-size:13px;">per completion</span></h3>'+
           '<p class="muted" style="font-size:14px;min-height:40px;">'+esc(t.instructions).slice(0,90)+'…</p>'+
           '<div class="muted" style="font-size:12px;margin-bottom:10px;">'+t.completed+'/'+t.quantity+' completed</div>'+
@@ -1104,6 +1174,7 @@ function renderDashboard(){
 function renderMyAccount(){
   var user=state.user;
   var tier=tierById(user.tier_id);
+  var tb = myTierBenefit();
   var refLink = window.location.origin + window.location.pathname + "?ref=" + (user.ref_code||"");
   var dId = displayIdFor(user);
 
@@ -1158,17 +1229,26 @@ function renderMyAccount(){
         referrals.map(function(r){
           return '<div class="row"><div><strong>'+esc(r.name)+'</strong> <span class="mono" style="font-size:12px;color:var(--teal-700);">'+esc(r.display_id||"")+'</span><div class="muted" style="font-size:12px;">joined '+new Date(Number(r.created_at)).toLocaleDateString()+'</div></div></div>';
         }).join("")
-        : '<p class="muted" style="font-size:13px;">You have not referred anyone yet. Share your link to start earning 10% of their task earnings forever.</p>'
+        : '<p class="muted" style="font-size:13px;">You have not referred anyone yet. Share your link — when your friends upgrade to a paid tier, you earn 2% of their task income.</p>'
       )+
     '</div>'+
 
     '<div class="section">'+
-      '<h3>Tier</h3>'+
-      '<div class="kv">'+
-        '<div>Current tier</div><div><span class="pill" style="background:var(--teal-600);">'+tier.name+'</span></div>'+
-        '<div>Tier fee</div><div>'+fmtN(tier.fee)+'</div>'+
-      '</div>'+
-      '<a href="#" onclick="go(\'upgrade\');return false;" class="btn btn-ghost btn-sm">'+(user.tier_id==="free"?"Upgrade":"Change tier")+'</a>'+
+      '<h3>Your tier: '+tier.name+'</h3>'+
+      (tb ?
+        '<div class="kv">'+
+          '<div>Earning multiplier</div><div style="font-weight:700;color:var(--teal-700);">×'+tb.multiplier+' (you earn '+(Number(tb.multiplier)*100).toFixed(0)+'% of base rate)</div>'+
+          '<div>Withdraw fee</div><div>'+(Number(tb.withdraw_fee_pct)*100).toFixed(0)+'% instead of 20%</div>'+
+          '<div>Min task withdrawal</div><div>'+fmtN(tb.withdraw_min_task)+'</div>'+
+          '<div>Min affiliate withdrawal</div><div>'+fmtN(tb.withdraw_min_affiliate)+'</div>'+
+          '<div>Premium tasks</div><div>'+(tb.premium_access?'Unlocked':'Not available — upgrade')+'</div>'+
+          '<div>Monthly bonus cap</div><div>First '+tb.monthly_incentive_cap+' completed tasks/month earn the bonus</div>'+
+          '<div>Support SLA</div><div>'+tb.support_sla_hours+' hours</div>'+
+        '</div>'
+        :
+        '<p class="muted">Loading tier details…</p>'
+      )+
+      (user.tier_id==="free" ? '<a href="#" onclick="go(\'upgrade\');return false;" class="btn btn-primary btn-sm" style="margin-top:10px;">Upgrade to unlock premium tasks and better rates</a>' : '')+
     '</div>'+
 
     '<div class="section">'+
@@ -1211,6 +1291,7 @@ function renderTaskDetail(){
   var cat=CATEGORIES[task.category]||{color:"#0d9488"};
   return '<div class="card wide" style="max-width:720px;">'+
     '<span class="pill" style="background:'+cat.color+';">'+task.category+'</span>'+
+    (task.premium?' <span class="pill" style="background:#f59e0b;">★ PREMIUM</span>':'')+
     '<h2 style="margin-top:10px;">'+fmtN(task.reward)+' — '+task.category+' task</h2>'+
     '<p class="muted">'+esc(task.instructions)+'</p>'+
     '<a class="action-link" href="'+esc(task.link)+'" target="_blank" rel="noreferrer">'+actionButtonIcon(task.category)+'<span>'+actionLinkLabel(task.category)+'</span></a>'+
@@ -1261,6 +1342,7 @@ function ledgerLabel(k){
 
 function renderWallet(){
   var user=state.user;
+  var tb = myTierBenefit();
   var ledger=state.ledger||[];
   var filter=state.ledgerFilter||"all";
   var filtered = filter==="all" ? ledger : ledger.filter(function(l){return ledgerKind(l)===filter});
@@ -1277,7 +1359,6 @@ function renderWallet(){
   var filterOpts=filters.map(function(f){return '<option value="'+f+'"'+(filter===f?" selected":"")+'>'+ledgerLabel(f)+'</option>'}).join("");
 
   var warnings = [];
-
   state.withdrawals.forEach(function(w){
     if(w.status === "pending" && hoursAgo(w.ts) >= 24){
       warnings.push('<div class="banner" style="background:#fef3c7;color:#92400e;text-align:left;">'+
@@ -1285,9 +1366,6 @@ function renderWallet(){
         'If you need to follow up, <a href="#" onclick="go(\'support\');return false;" style="color:#0f766e;font-weight:700;">contact support</a>.'+
         '</div>');
     }
-  });
-
-  state.withdrawals.forEach(function(w){
     if(w.status === "approved" && !w.received_confirmed && w.approved_at && hoursAgo(w.approved_at) >= 24){
       warnings.push('<div class="banner" style="background:#fee2e2;color:#991b1b;text-align:left;">'+
         'Your '+w.type+' withdrawal of '+fmtN(w.net)+' was approved more than 24 hours ago. '+
@@ -1303,13 +1381,13 @@ function renderWallet(){
     }
   });
 
-  var minTask = Number((state.settings&&state.settings.withdraw_min_task)||10000);
-  var minAff  = Number((state.settings&&state.settings.withdraw_min_affiliate)||1000);
-  var feePct  = Number((state.settings&&state.settings.withdraw_fee_pct)||0.2);
-  var canTask = isWithdrawDayToday("task", state.settings);
-  var canAff  = isWithdrawDayToday("affiliate", state.settings);
-  var nextTask = nextWithdrawDate("task", state.settings);
-  var nextAff  = nextWithdrawDate("affiliate", state.settings);
+  var minTask = Number((tb && tb.withdraw_min_task) || (state.settings&&state.settings.withdraw_min_task) || 10000);
+  var minAff  = Number((tb && tb.withdraw_min_affiliate) || (state.settings&&state.settings.withdraw_min_affiliate) || 1000);
+  var feePct  = Number((tb && tb.withdraw_fee_pct) || (state.settings&&state.settings.withdraw_fee_pct) || 0.2);
+  var canTask = isWithdrawDayToday("task", state.settings, tb);
+  var canAff  = isWithdrawDayToday("affiliate", state.settings, tb);
+  var nextTask = nextWithdrawDate("task", state.settings, tb);
+  var nextAff  = nextWithdrawDate("affiliate", state.settings, tb);
 
   var approvedPayout = (state.payoutMethods||[]).filter(function(m){return m.status==="approved"})[0];
 
@@ -1323,7 +1401,7 @@ function renderWallet(){
         '<option value="affiliate"'+(state.wdType==="affiliate"?" selected":"")+'>Affiliate earnings — min '+fmtN(minAff)+' — next '+nextAff+'</option>'+
       '</select>'+
       '<input id="wd-amount" type="number" placeholder="Amount" />'+
-      '<p class="muted" style="font-size:12px;">Fee: '+(feePct*100).toFixed(0)+'% of the amount. Paid to your approved bank: '+esc(approvedPayout.bank_name)+' ••••'+esc(approvedPayout.account_number.slice(-4))+'</p>';
+      '<p class="muted" style="font-size:12px;">Fee: '+(feePct*100).toFixed(0)+'% of the amount (your tier: '+((tb && tb.withdraw_fee_pct) ? (tb.withdraw_fee_pct*100).toFixed(0)+'%' : '20%')+'). Paid to your approved bank: '+esc(approvedPayout.bank_name)+' ••••'+esc(approvedPayout.account_number.slice(-4))+'</p>';
     var currentDayAllowed = state.wdType==="affiliate" ? canAff : canTask;
     if(!currentDayAllowed){
       withdrawBlock += '<button class="btn btn-amber btn-full" disabled>Withdrawals closed today</button>'+
@@ -1496,13 +1574,46 @@ function renderFundWallet(){
 }
 
 function renderUpgrade(){
+  var currentTierId = state.user.tier_id || "free";
   var tier=tierById(state.upgradeTierId);
   var bank = bankFor(state.settings, "tier");
   var paid=TIERS.filter(function(t){return t.fee>0});
   var options=paid.map(function(t){return '<option value="'+t.id+'"'+(t.id===state.upgradeTierId?" selected":"")+'>'+t.name+' — '+fmtN(t.fee)+'</option>'}).join("");
+
+  // Build the benefits comparison table
+  var benefitRows = [
+    ["Earning multiplier", function(b){ return b ? "×"+b.multiplier : "—" }],
+    ["Premium tasks", function(b){ return b && b.premium_access ? "Yes" : "No" }],
+    ["Withdrawal fee", function(b){ return b ? (Number(b.withdraw_fee_pct)*100).toFixed(0)+"%" : "—" }],
+    ["Min task withdrawal", function(b){ return b ? fmtN(b.withdraw_min_task) : "—" }],
+    ["Min affiliate withdrawal", function(b){ return b ? fmtN(b.withdraw_min_affiliate) : "—" }],
+    ["Monthly bonus cap", function(b){ return b ? b.monthly_incentive_cap+" completions" : "—" }],
+    ["Support SLA", function(b){ return b ? b.support_sla_hours+"h" : "—" }]
+  ];
+  var tableHtml = '<div class="card wide" style="margin-top:20px;"><h3 style="margin-top:0;">Compare tiers</h3>'+
+    '<div style="overflow-x:auto;">'+
+    '<table style="width:100%; border-collapse:collapse; font-size:13px;">'+
+      '<thead><tr style="background:rgba(241,245,249,.7);">'+
+        '<th style="text-align:left; padding:10px; border-bottom:1px solid var(--slate-200);">Benefit</th>'+
+        TIERS.map(function(t){
+          return '<th style="text-align:left; padding:10px; border-bottom:1px solid var(--slate-200);'+(t.id===currentTierId?' background:linear-gradient(180deg,#f0fdfa,#fff);':'')+'">'+t.name+'</th>';
+        }).join("")+
+      '</tr></thead><tbody>'+
+      benefitRows.map(function(pair){
+        return '<tr>'+
+          '<td style="padding:10px; border-bottom:1px solid var(--slate-100); font-weight:600; color:var(--slate-600);">'+pair[0]+'</td>'+
+          TIERS.map(function(t){
+            var b = (state.tierBenefits||[]).filter(function(x){return x.tier_id===t.id})[0];
+            return '<td style="padding:10px; border-bottom:1px solid var(--slate-100);'+(t.id===currentTierId?' background:linear-gradient(180deg,#f0fdfa,#fff); font-weight:600;':'')+'">'+pair[1](b)+'</td>';
+          }).join("")+
+        '</tr>';
+      }).join("")+
+    '</tbody></table></div></div>';
+
   var html="";
   if(state.upgradeStage==="select"){
-    html='<select id="up-tier" onchange="chooseUpgradeTier(this.value)">'+options+'</select>'+
+    html='<p class="muted" style="font-size:13px;">Current tier: <strong>'+tierById(currentTierId).name+'</strong></p>'+
+      '<select id="up-tier" onchange="chooseUpgradeTier(this.value)">'+options+'</select>'+
       '<p>You will pay: <strong>'+fmtN(tier.fee)+'</strong></p>'+
       '<button class="btn btn-primary btn-full" onclick="revealBank()">Get bank details</button>';
   } else if(state.upgradeStage==="loading"){
@@ -1523,7 +1634,7 @@ function renderUpgrade(){
   }
   return '<div class="card"><h2>Upgrade membership</h2>'+
     '<p class="muted" style="font-size:14px;">One-time lifetime fee. Manual bank transfer, verified by admin.</p>'+
-    html+'</div>';
+    html+'</div>'+tableHtml;
 }
 
 function renderCreateTask(){
@@ -1542,7 +1653,7 @@ function renderCreateTask(){
     '<input id="ct-reward" type="number" value="'+d.payout+'" oninput="updateTaskTotals()" />'+
     '<label class="lbl">Instructions</label>'+
     '<textarea id="ct-instructions" style="min-height:90px;">'+d.template+'</textarea>'+
-    '<label style="display:flex;gap:8px;align-items:center;margin:12px 0;"><input type="checkbox" id="ct-premium" /> Premium lane (+40%) — routes to paid-tier workers first</label>'+
+    '<label style="display:flex;gap:8px;align-items:center;margin:12px 0;"><input type="checkbox" id="ct-premium" /> Premium lane — reserved for paid-tier workers for the first 24 hours</label>'+
     '<div style="background:rgba(241,245,249,.7); border:1px solid var(--slate-200); border-radius:12px; padding:14px;">'+
       '<div>Worker payout total: <strong id="ct-worker-total">'+fmtN(d.payout*MIN_TASK_QTY)+'</strong></div>'+
       '<div>Platform commission (50%): <strong id="ct-commission">'+fmtN(d.payout*MIN_TASK_QTY*0.5)+'</strong></div>'+
@@ -1567,7 +1678,10 @@ function renderMyTasks(){
     var statusColor=t.status==="live"?"#16a34a":t.status==="completed"?"#0d9488":t.status==="paused"?"#94a3b8":t.status==="cancelled"?"#dc2626":"#d97706";
     var pct=Math.min(100,(t.completed/t.quantity)*100);
     return '<div class="row" style="flex-direction:column;align-items:stretch;">'+
-      '<div style="display:flex;justify-content:space-between;"><strong>'+t.category+' &middot; '+fmtN(t.reward)+'/task</strong><span class="pill" style="background:'+statusColor+';">'+t.status+'</span></div>'+
+      '<div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:6px;">'+
+        '<strong>'+t.category+' &middot; '+fmtN(t.reward)+'/task'+(t.premium?' <span class="pill" style="background:#f59e0b;">★ PREMIUM</span>':'')+'</strong>'+
+        '<span class="pill" style="background:'+statusColor+';">'+t.status+'</span>'+
+      '</div>'+
       '<div class="muted" style="font-size:14px;margin-top:6px;">'+t.completed+'/'+t.quantity+' completed &middot; '+fmtN(t.completed*t.reward*1.5)+' of '+fmtN(t.escrow_total||t.advertiser_total)+' spent &middot; '+fmtN(t.escrow_remaining||0)+' remaining in escrow</div>'+
       '<div class="progress-bg"><div class="progress-fg" style="width:'+pct+'%;"></div></div>'+
     '</div>';
@@ -1578,6 +1692,7 @@ function renderMyTasks(){
 function renderSettings(){
   var user=state.user;
   var dId = displayIdFor(user);
+  var tb = myTierBenefit();
   var notifPerm = ("Notification" in window) ? Notification.permission : "unavailable";
   var permBtn = notifPerm==="default" ? '<button class="btn btn-ghost" onclick="Notification.requestPermission().then(render)">Enable browser notifications</button>' :
                 notifPerm==="granted" ? '<span class="pill" style="background:#16a34a;">enabled</span>' :
@@ -1592,7 +1707,7 @@ function renderSettings(){
         '<div>Name</div><div>'+esc(user.name)+'</div>'+
         '<div>Email</div><div>'+esc(user.email)+'</div>'+
         '<div>Your ID</div><div class="mono" style="font-weight:700;color:var(--teal-700);">'+esc(dId)+'</div>'+
-        '<div>Tier</div><div>'+tierById(user.tier_id).name+'</div>'+
+        '<div>Tier</div><div>'+tierById(user.tier_id).name+(tb?(' — ×'+tb.multiplier+' bonus'):'')+'</div>'+
         '<div>Joined</div><div>'+new Date(Number(user.created_at)).toLocaleString()+'</div>'+
       '</div>'+
       '<div style="display:flex;gap:8px;flex-wrap:wrap;">'+

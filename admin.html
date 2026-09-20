@@ -174,12 +174,12 @@
 <script>
 /* ============================================================
    TaskLoop — admin portal
-   Includes: full payout bank details, FormSubmit notifications,
-   display IDs, settings, broadcast, audit.
+   Includes: support toggles, 24h flags, full bank details,
+   bank accounts editor, broadcast, audit.
    ============================================================ */
 
 var SUPABASE_URL = "https://jcajknuldlkuwtxhymbt.supabase.co";
-var SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImpjYWprbnVsZGxrdXd0eGh5bWJ0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODk1NjE1MjIsImV4cCI6MjEwNTEzNzUyMn0.erATFYwKkdq6crbHqu1KG3OknUCEDcN6CvvkGDHZRn8";
+var SUPABASE_ANON_KEY = "PASTE_YOUR_ANON_KEY_HERE";
 var sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 var TIERS = [
@@ -194,6 +194,7 @@ var DAY_NAMES = ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
 function fmtN(n){return "\u20A6"+Number(n||0).toLocaleString("en-NG")}
 function tierById(id){for(var i=0;i<TIERS.length;i++)if(TIERS[i].id===id)return TIERS[i];return TIERS[0]}
 function esc(s){var d=document.createElement("div");d.innerText=s==null?"":s;return d.innerHTML}
+function hoursAgo(ts){ return (Date.now()-Number(ts))/3600000; }
 
 var SESSION_KEY = "taskloop_admin_session";
 function getSession(){ try{ return JSON.parse(localStorage.getItem(SESSION_KEY)||"null") }catch(e){ return null } }
@@ -207,18 +208,11 @@ var state = {
   tab: "overview",
   modal: null,
   search: "",
-  editBlockedDays: [],
-  editBlockedDates: [],
-  editExpiryDays: 30,
-  editWithdrawTaskDays: [],
-  editWithdrawAffiliateDays: [],
-  editWithdrawMinTask: 10000,
-  editWithdrawMinAffiliate: 1000,
-  editWithdrawFeePct: 20,
-  editSupport: {},
-  editBanks: {},
-  broadcastMode: "all",
-  broadcastKind: "broadcast"
+  editBlockedDays: [], editBlockedDates: [], editExpiryDays: 30,
+  editWithdrawTaskDays: [], editWithdrawAffiliateDays: [],
+  editWithdrawMinTask: 10000, editWithdrawMinAffiliate: 1000, editWithdrawFeePct: 20,
+  editSupport: {}, editBanks: {},
+  broadcastMode: "all", broadcastKind: "broadcast"
 };
 
 var toastTimer=null;
@@ -457,7 +451,13 @@ function loadSettingsIntoEditor(){
     };
   }
   if(state.support){
-    state.editSupport = Object.assign({}, state.support);
+    state.editSupport = Object.assign({}, state.support, {
+      whatsapp_enabled: state.support.whatsapp_enabled !== false,
+      telegram_enabled: state.support.telegram_enabled !== false,
+      email_enabled: state.support.email_enabled !== false,
+      response_time_hours: state.support.response_time_hours || 24,
+      support_note: state.support.support_note || ""
+    });
   }
 }
 function toggleDay(d){
@@ -509,7 +509,7 @@ function saveSettings(){
   },"Settings saved");
 }
 function saveSupport(){
-  var s=state.editSupport;
+  var s=state.editSupport||{};
   callAdmin("fn_admin_update_support",{
     p_whatsapp_number: s.whatsapp_number||null,
     p_telegram_username: s.telegram_username||null,
@@ -517,14 +517,20 @@ function saveSupport(){
     p_telegram_group_link: s.telegram_group_link||null,
     p_whatsapp_channel_link: s.whatsapp_channel_link||null,
     p_telegram_channel_link: s.telegram_channel_link||null,
-    p_support_email: s.support_email||null
+    p_support_email: s.support_email||null,
+    p_whatsapp_enabled: s.whatsapp_enabled !== false,
+    p_telegram_enabled: s.telegram_enabled !== false,
+    p_email_enabled: s.email_enabled !== false,
+    p_response_time_hours: Number(s.response_time_hours)||24,
+    p_support_note: s.support_note||null
   },"Support contacts saved");
 }
 function updateSupportField(k, v){ state.editSupport[k]=v; }
+function toggleSupportField(k){ state.editSupport[k] = !state.editSupport[k]; render(); }
 
 function updateBankField(k, v){ state.editBanks[k]=v; }
 function saveBanks(){
-  var b=state.editBanks;
+  var b=state.editBanks||{};
   callAdmin("fn_admin_update_banks",{
     p_wallet_number: b.wallet_bank_number||null,
     p_wallet_name:   b.wallet_bank_name||null,
@@ -712,9 +718,14 @@ function renderFinanceTab(){
     var u=state.users.filter(function(x){return x.id===w.user_id})[0];
     var color=w.status==="pending"?"#d97706":w.status==="approved"?"#16a34a":"#dc2626";
     var dId = u && u.display_id ? u.display_id : "?";
+    var stale = isPending && hoursAgo(w.ts) >= 24;
     return '<div class="row"><div><strong>'+esc(w.full_name)+'</strong> <span class="mono" style="font-size:12px;color:#5eead4;">'+esc(dId)+'</span> — '+fmtN(w.amount)+
       '<div class="dim" style="font-size:12px;">user: '+(u?esc(u.email):"?")+' &middot; '+new Date(Number(w.ts)).toLocaleString()+' &middot; <span class="pill" style="background:'+color+';">'+w.status+'</span></div></div>'+
-      (isPending?'<div style="display:flex;gap:6px;"><button class="btn btn-sm btn-primary" onclick="approveWalletFund(\''+w.id+'\')">Approve</button><button class="btn btn-sm btn-danger" onclick="rejectWalletFund(\''+w.id+'\')">Reject</button></div>':"")+
+      (isPending?'<div style="display:flex;gap:6px;align-items:center;">'+
+        (stale?'<span class="pill" style="background:#dc2626;">24h+ old</span>':'')+
+        '<button class="btn btn-sm btn-primary" onclick="approveWalletFund(\''+w.id+'\')">Approve</button>'+
+        '<button class="btn btn-sm btn-danger" onclick="rejectWalletFund(\''+w.id+'\')">Reject</button>'+
+      '</div>':"")+
     '</div>';
   }
 
@@ -767,9 +778,11 @@ function renderFinanceTab(){
        var u=state.users.filter(function(x){return x.id===d.user_id})[0];
        var color=d.status==="pending"?"#d97706":d.status==="approved"?"#16a34a":"#dc2626";
        var dId = u && u.display_id ? u.display_id : "?";
+       var stale = d.status==="pending" && hoursAgo(d.ts) >= 24;
        return '<div class="row"><div><strong>'+esc(d.full_name)+'</strong> <span class="mono" style="font-size:12px;color:#5eead4;">'+esc(dId)+'</span> — '+tierById(d.tier_id).name+' — '+fmtN(d.amount)+
          '<div class="dim" style="font-size:12px;">user: '+(u?esc(u.email):"?")+' &middot; '+new Date(Number(d.ts)).toLocaleString()+'</div></div>'+
          '<div style="display:flex;gap:6px;align-items:center;"><span class="pill" style="background:'+color+';">'+d.status+'</span>'+
+         (stale?'<span class="pill" style="background:#dc2626;">24h+ old</span>':'')+
          (d.status==="pending"?'<button class="btn btn-sm btn-primary" onclick="approveDeposit(\''+d.id+'\')">Approve</button><button class="btn btn-sm btn-danger" onclick="rejectDeposit(\''+d.id+'\')">Reject</button>':"")+
          '</div></div>';
      }).join(""))+
@@ -788,12 +801,18 @@ function renderFinanceTab(){
              '<div>Account name</div><div><strong>'+esc(pm.account_name)+'</strong></div>'+
            '</div>'
          : '<div class="dim" style="font-size:12px;margin-top:6px;">No approved payout method on file.</div>';
+       var hoursSinceApproved = w.approved_at ? (Date.now() - Number(w.approved_at)) / 3600000 : null;
+       var notReceived = w.status==="approved" && !w.received_confirmed && hoursSinceApproved !== null && hoursSinceApproved >= 24;
+       var receivedBadge = w.received_confirmed ? '<span class="pill" style="background:#16a34a;margin-left:6px;">received</span>' :
+                            notReceived ? '<span class="pill" style="background:#dc2626;margin-left:6px;">NOT received (24h+)</span>' :
+                            w.status==="approved" ? '<span class="pill" style="background:#64748b;margin-left:6px;">awaiting confirm</span>' : "";
        return '<div class="row" style="flex-direction:column;align-items:stretch;">'+
          '<div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px;">'+
            '<div><strong>'+(u?esc(u.name):"?")+'</strong> <span class="mono" style="font-size:12px;color:#5eead4;">'+esc(dId)+'</span>'+
              '<div class="dim" style="font-size:12px;">'+w.type+' &middot; gross '+fmtN(w.amount)+' &middot; fee '+fmtN(w.fee)+' &middot; net '+fmtN(w.net)+' &middot; '+new Date(Number(w.ts)).toLocaleString()+'</div>'+
+             (w.approved_at?'<div class="dim" style="font-size:12px;">approved: '+new Date(Number(w.approved_at)).toLocaleString()+'</div>':"")+
            '</div>'+
-           '<span class="pill" style="background:'+color+';">'+w.status+'</span>'+
+           '<span><span class="pill" style="background:'+color+';">'+w.status+'</span>'+receivedBadge+'</span>'+
          '</div>'+
          payDetails+
          (w.status==="pending"?'<div style="display:flex;gap:6px;margin-top:10px;"><button class="btn btn-sm btn-primary" onclick="approveWithdrawal(\''+w.id+'\')">Mark paid</button><button class="btn btn-sm btn-danger" onclick="rejectWithdrawal(\''+w.id+'\')">Reject</button></div>':"")+
@@ -821,7 +840,6 @@ function renderBroadcastTab(){
     '<label class="lbl">Title</label><input id="bc-title" placeholder="e.g. New tasks available this week" />'+
     '<label class="lbl">Message</label><textarea id="bc-body" style="min-height:90px;" placeholder="Optional details"></textarea>'+
     '<button class="btn btn-primary btn-full" onclick="sendBroadcast()">Send now</button>'+
-
     '<h3 style="margin-top:24px;">Recent broadcasts</h3>'+
     (function(){
       var bcs = state.auditLog.filter(function(a){return a.action==="broadcast"}).slice(0,10);
@@ -982,6 +1000,21 @@ function renderSettingsTab(){
       sfield("telegram_group_link","Telegram group link")+
       sfield("whatsapp_channel_link","WhatsApp channel link")+
       sfield("telegram_channel_link","Telegram channel link")+
+
+      '<h3 style="margin-top:18px;">Channel toggles</h3>'+
+      '<p class="hint">Turn a channel off and it disappears from the user Support page — no need to delete the link.</p>'+
+      '<div style="display:flex;gap:10px;flex-wrap:wrap;margin:8px 0;">'+
+        '<button class="day-btn '+((sp.whatsapp_enabled!==false)?'allowed':'blocked')+'" onclick="toggleSupportField(\'whatsapp_enabled\')">WhatsApp: '+((sp.whatsapp_enabled!==false)?'ON':'OFF')+'</button>'+
+        '<button class="day-btn '+((sp.telegram_enabled!==false)?'allowed':'blocked')+'" onclick="toggleSupportField(\'telegram_enabled\')">Telegram: '+((sp.telegram_enabled!==false)?'ON':'OFF')+'</button>'+
+        '<button class="day-btn '+((sp.email_enabled!==false)?'allowed':'blocked')+'" onclick="toggleSupportField(\'email_enabled\')">Email: '+((sp.email_enabled!==false)?'ON':'OFF')+'</button>'+
+      '</div>'+
+
+      '<label class="lbl">Typical response time (hours)</label>'+
+      '<input type="number" value="'+esc(sp.response_time_hours||24)+'" oninput="updateSupportField(\'response_time_hours\',this.value)" min="1" />'+
+
+      '<label class="lbl">Support note (optional, shown above the buttons)</label>'+
+      '<input value="'+esc(sp.support_note||"")+'" oninput="updateSupportField(\'support_note\',this.value)" placeholder="e.g. Mon-Fri, 9am-6pm WAT. Replies within 24 hours." />'+
+
       '<button class="btn btn-primary btn-full" onclick="saveSupport()">Save support contacts</button>'+
     '</div>';
 }

@@ -206,6 +206,15 @@
   .cta.tg{background:linear-gradient(180deg,#2AABEE,#229ED9)}
   .cta.em{background:linear-gradient(180deg,#0d9488,#0f766e)}
   .support-note{background:#fffbeb; border:1px solid #fde68a; color:#78350f; border-radius:12px; padding:14px 16px; margin-top:16px; font-size:14px}
+
+  .pool-bar{display:flex;height:8px;border-radius:6px;overflow:hidden;margin-top:6px;background:rgba(148,163,184,.2)}
+  .pool-bar .seg{height:100%;transition:width .3s ease}
+  .pool-bar .seg.reserved{background:linear-gradient(90deg,#7c3aed,#8b5cf6)}
+  .pool-bar .seg.general{background:linear-gradient(90deg,#0d9488,#14b8a6)}
+  .pool-bar .seg.filled{background:linear-gradient(90deg,#94a3b8,#64748b)}
+  .pool-legend{display:flex;gap:10px;font-size:11px;color:var(--slate-500);margin-top:6px;flex-wrap:wrap}
+  .pool-legend span{display:inline-flex;align-items:center;gap:4px}
+  .pool-legend .dot{width:8px;height:8px;border-radius:999px;display:inline-block}
 </style>
 </head>
 <body>
@@ -234,7 +243,11 @@
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script>
 /* ============================================================
-   TaskLoop — main app (final, with Step D)
+   TaskLoop — main app
+   Includes: slot-based reservation for premium tasks,
+   tier multipliers, greeting banner, display IDs,
+   action-labelled task buttons, contact support,
+   24h warning banners, FormSubmit fallback.
    ============================================================ */
 
 var SUPABASE_URL = "https://jcajknuldlkuwtxhymbt.supabase.co";
@@ -260,6 +273,7 @@ var MIN_TASK_QTY = 20;
 var TARGET_ON_PAGE_MS = 4000;
 var WALLET_PRESETS = [5000, 10000, 25000, 50000, 100000];
 var DEFAULT_BANK = { number:"5012652807", name:"PEER PULSE TECHNOLOGY", bank:"Safe Haven MFB" };
+var DEFAULT_RESERVED_WINDOW_HOURS = 12;
 
 function uid(){return Math.random().toString(36).slice(2)+Date.now().toString(36)}
 function fmtN(n){return "\u20A6"+Number(n||0).toLocaleString("en-NG")}
@@ -272,15 +286,22 @@ function displayIdFor(user){
   return user.display_id || ("TL-" + (user.id||"").slice(0,8).toUpperCase());
 }
 function hoursAgo(ts){ return (Date.now()-Number(ts))/3600000; }
+function isPaidTier(tierId){ return tierId && tierId !== "free"; }
 
-function premiumReservationInfo(task){
-  if(!task || !task.premium) return { reserved: false, secondsLeft: 0 };
-  var created = Number(task.created_at || 0);
-  if(!created) return { reserved: false, secondsLeft: 0 };
-  var RESERVE_MS = 24*3600*1000;
-  var elapsed = Date.now() - created;
-  if(elapsed >= RESERVE_MS) return { reserved: false, secondsLeft: 0 };
-  return { reserved: true, secondsLeft: Math.floor((RESERVE_MS - elapsed)/1000) };
+/* ---------- Reservation window math ---------- */
+function taskReservedWindowHours(task){
+  return Number(task.reserved_window_hours || DEFAULT_RESERVED_WINDOW_HOURS);
+}
+function taskReservedWindowActive(task){
+  if(!task || !task.premium) return false;
+  var windowMs = taskReservedWindowHours(task) * 3600 * 1000;
+  var releaseAt = Number(task.created_at || 0) + windowMs;
+  return Date.now() < releaseAt;
+}
+function taskReserveSecondsLeft(task){
+  if(!taskReservedWindowActive(task)) return 0;
+  var releaseAt = Number(task.created_at || 0) + taskReservedWindowHours(task) * 3600 * 1000;
+  return Math.max(0, Math.floor((releaseAt - Date.now())/1000));
 }
 function humanizeSeconds(s){
   if(s <= 0) return "now";
@@ -290,22 +311,28 @@ function humanizeSeconds(s){
   return m + "m";
 }
 
-function isBlockedDay(settings){
-  if(!settings) return false;
-  var d=new Date(); var dow=d.getDay();
-  if(settings.blocked_days && settings.blocked_days.indexOf(dow)!==-1) return true;
-  var today=d.toISOString().slice(0,10);
-  if(settings.blocked_dates && settings.blocked_dates.indexOf(today)!==-1) return true;
-  return false;
+/* ---------- Client-side pool estimate ----------
+   This is a rough display estimate. The server is the source of truth. */
+function estimateReserve(quantity){
+  // Count paid users from what we know client-side (approximation).
+  // Server uses the real counts. This is only for the card preview.
+  var total = state._userCountEstimate || 0;
+  var paid = state._paidUserCountEstimate || 0;
+  if(!total || !paid) {
+    // fall back to whatever the tier benefits tell us
+    return Math.min(Math.floor(quantity/2), Math.max(2, Math.round(quantity * 0.15)));
+  }
+  var ratio = paid/total;
+  var raw = Math.round(quantity * ratio);
+  raw = Math.max(2, raw);
+  return Math.min(Math.floor(quantity/2), raw);
 }
+
+/* ---------- Withdrawal schedule helpers (tier-aware) ---------- */
 function nextWithdrawDate(type, settings, tierBenefit){
   var arr = null;
-  if(tierBenefit){
-    arr = type==="task" ? tierBenefit.withdraw_task_days : tierBenefit.withdraw_affiliate_days;
-  }
-  if(!arr && settings){
-    arr = type==="task" ? settings.withdraw_task_days : settings.withdraw_affiliate_days;
-  }
+  if(tierBenefit) arr = type==="task" ? tierBenefit.withdraw_task_days : tierBenefit.withdraw_affiliate_days;
+  if(!arr && settings) arr = type==="task" ? settings.withdraw_task_days : settings.withdraw_affiliate_days;
   if(!arr || !arr.length) return "—";
   var allDow = true;
   for(var i=0;i<arr.length;i++) if(arr[i]>6) allDow=false;
@@ -319,18 +346,22 @@ function nextWithdrawDate(type, settings, tierBenefit){
 }
 function isWithdrawDayToday(type, settings, tierBenefit){
   var arr = null;
-  if(tierBenefit){
-    arr = type==="task" ? tierBenefit.withdraw_task_days : tierBenefit.withdraw_affiliate_days;
-  }
-  if(!arr && settings){
-    arr = type==="task" ? settings.withdraw_task_days : settings.withdraw_affiliate_days;
-  }
+  if(tierBenefit) arr = type==="task" ? tierBenefit.withdraw_task_days : tierBenefit.withdraw_affiliate_days;
+  if(!arr && settings) arr = type==="task" ? settings.withdraw_task_days : settings.withdraw_affiliate_days;
   if(!arr || !arr.length) return true;
   var today = new Date();
   var allDow = true;
   for(var i=0;i<arr.length;i++) if(arr[i]>6) allDow=false;
   if(allDow) return arr.indexOf(today.getDay())!==-1;
   return arr.indexOf(today.getDate())!==-1;
+}
+function isBlockedDay(settings){
+  if(!settings) return false;
+  var d=new Date(); var dow=d.getDay();
+  if(settings.blocked_days && settings.blocked_days.indexOf(dow)!==-1) return true;
+  var today=d.toISOString().slice(0,10);
+  if(settings.blocked_dates && settings.blocked_dates.indexOf(today)!==-1) return true;
+  return false;
 }
 function bankFor(settings, kind){
   var s = settings || {};
@@ -367,13 +398,18 @@ var state = {
   wdType: "task",
   notifPanelOpen: false,
   _lastNotifId: null,
-  _askedNotifPerm: false
+  _askedNotifPerm: false,
+  _userCountEstimate: 0,
+  _paidUserCountEstimate: 0
 };
 
 function myTierBenefit(){
   if(!state.user) return null;
   var tid = state.user.tier_id || "free";
   return (state.tierBenefits||[]).filter(function(b){return b.tier_id===tid})[0] || null;
+}
+function isPaid(){
+  return state.user && isPaidTier(state.user.tier_id);
 }
 
 var toastTimer=null;
@@ -626,12 +662,25 @@ async function loadTierBenefits(){
     state.tierBenefits = data||[];
   }catch(e){ state.tierBenefits=[] }
 }
+/* Lightweight user-count estimate to render the reserve ratio in the UI.
+   Server is the source of truth for actual reservation. This is display-only. */
+async function loadUserCountEstimates(){
+  try{
+    var all = await sb.from("users").select("tier_id");
+    if(all.data){
+      state._userCountEstimate = all.data.length;
+      state._paidUserCountEstimate = all.data.filter(function(u){return u.tier_id && u.tier_id !== "free"}).length;
+    }
+  }catch(e){}
+}
+
 async function refreshAll(){
   await loadUser();
   await Promise.all([
     loadTasks(), loadSubmissions(), loadLedger(), loadWithdrawals(),
     loadNotifications(), loadSettings(), loadPayoutMethods(),
-    loadSupport(), loadReferrals(), loadTierBenefits()
+    loadSupport(), loadReferrals(), loadTierBenefits(),
+    loadUserCountEstimates()
   ]);
 }
 
@@ -674,7 +723,12 @@ async function startTask(taskId){
   try{
     var {data,error} = await sb.rpc("fn_start_task",{p_task_id:taskId,p_worker_id:state.user.id});
     if(error) throw new Error(error.message);
-    state.activeStart = {startId:data.startId, startedAt:data.startedAt, taskId:taskId};
+    state.activeStart = {
+      startId:data.startId,
+      startedAt:data.startedAt,
+      taskId:taskId,
+      pool: data.pool || "general"
+    };
     state.currentTask = state.tasks.filter(function(t){return t.id===taskId})[0];
     go("task");
   }catch(e){ notify(e.message||"Could not start task","error") }
@@ -876,7 +930,10 @@ async function createTask(){
       p_quantity:quantity, p_reward:reward, p_instructions:instructions, p_premium:premium
     });
     if(error) throw new Error(error.message);
-    notify("Task submitted. "+fmtN(data.advertiserTotal)+" held in escrow.","success");
+    var msg = premium
+      ? "Premium task submitted. "+fmtN(data.advertiserTotal)+" held in escrow. Slots will be reserved for paid-tier workers."
+      : "Task submitted. "+fmtN(data.advertiserTotal)+" held in escrow.";
+    notify(msg,"success");
     await loadUser();
     go("myTasks");
   }catch(e){ notify(e.message||"Could not create task","error") }
@@ -1091,6 +1148,48 @@ function actionButtonIcon(category){
   return i[category] || '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.5.5l3-3a5 5 0 0 0-7-7l-1 1"/><path d="M14 11a5 5 0 0 0-7.5-.5l-3 3a5 5 0 0 0 7 7l1-1"/></svg>';
 }
 
+/* ---------- Pool estimation for card display ---------- */
+function taskPoolInfo(task){
+  // Rough client-side estimate of the pool split. Server is authoritative.
+  var q = Number(task.quantity||0);
+  var completed = Number(task.completed||0);
+  var remaining = Math.max(0, q - completed);
+
+  if(!task.premium){
+    return { premium:false, reservedSlots:0, generalSlots:remaining, reservedTaken:0, generalTaken:0, inWindow:false };
+  }
+
+  var inWindow = taskReservedWindowActive(task);
+
+  // Compute reserve the same way the server does (using our user count estimate)
+  var reserve;
+  if(!inWindow){
+    reserve = 0;
+  } else {
+    reserve = estimateReserve(q);
+  }
+
+  // For display, we just show the reserve number and remaining.
+  // Actual taken-per-pool comes from server when we know it, but for
+  // the card we approximate by treating the reserve as still open.
+  var reservedTaken = Math.min(completed, reserve);
+  var generalTaken = Math.max(0, completed - reservedTaken);
+  var reservedLeft = Math.max(0, reserve - reservedTaken);
+  var generalLeft = Math.max(0, remaining - reservedLeft);
+
+  return {
+    premium: true,
+    reservedSlots: reserve,
+    generalSlots: q - reserve,
+    reservedTaken: reservedTaken,
+    generalTaken: generalTaken,
+    reservedLeft: reservedLeft,
+    generalLeft: generalLeft,
+    inWindow: inWindow,
+    windowSecondsLeft: taskReserveSecondsLeft(task)
+  };
+}
+
 function renderDashboard(){
   var user=state.user, tier=tierById(user.tier_id);
   var blocked=isBlockedDay(state.settings);
@@ -1100,19 +1199,32 @@ function renderDashboard(){
     if(s.status !== "rejected") submittedTaskIds[s.task_id] = s.status;
   });
 
-  var isPaid = user.tier_id && user.tier_id !== "free";
-  var isExec = user.tier_id === "executive";
+  var paid = isPaidTier(user.tier_id);
 
+  // Filter: hide tasks the user has submitted; for premium tasks, hide from free users ONLY when reserved window is active AND no general slots left.
   var liveTasks = state.tasks.filter(function(t){
     if(t.status !== "live") return false;
-    if(t.completed >= t.quantity) return false;
     if(submittedTaskIds[t.id]) return false;
-    // Premium tasks are paid-tier only
-    if(!isPaid && t.premium) return false;
-    return true;
+
+    var p = taskPoolInfo(t);
+    if(!p.premium){
+      return t.completed < t.quantity;
+    }
+
+    // Premium task
+    if(paid) {
+      // Paid users see it as long as any slot remains
+      return (p.reservedLeft + p.generalLeft) > 0;
+    }
+    // Free users: see it only if general slots remain OR the reserved window has closed and slots remain
+    if(!p.inWindow){
+      return t.completed < t.quantity;
+    }
+    return p.generalLeft > 0;
   });
 
-  if(isExec){
+  // Executive: bump premium to top
+  if(user.tier_id === "executive"){
     liveTasks.sort(function(a,b){
       var ap = a.premium ? 1 : 0;
       var bp = b.premium ? 1 : 0;
@@ -1125,30 +1237,60 @@ function renderDashboard(){
     ? '<div class="banner" style="background:#fef3c7;color:#92400e;">Tasks are paused today. Come back on an active day.</div>'
     : "";
 
-  var premiumCount = state.tasks.filter(function(t){
-    return t.status==="live" && t.completed<t.quantity && t.premium;
-  }).length;
-  if(!blocked && !isPaid && premiumCount > 0){
-    banner += '<div class="banner" style="background:#eef2ff;color:#3730a3;text-align:left;">'+
-      '<strong>'+premiumCount+' premium task'+(premiumCount===1?'':'s')+'</strong> '+
-      'are available only to Starter tier and above. '+
-      '<a href="#" onclick="go(\'upgrade\');return false;" style="color:#4338ca;font-weight:700;">Upgrade to unlock →</a>'+
-      '</div>';
+  // Nudge free users when premium tasks exist but they can't start one right now
+  if(!blocked && !paid){
+    var hiddenPremium = state.tasks.filter(function(t){
+      return t.status==="live" && t.premium && taskReservedWindowActive(t) && taskPoolInfo(t).generalLeft <= 0;
+    }).length;
+    if(hiddenPremium > 0){
+      banner += '<div class="banner" style="background:#eef2ff;color:#3730a3;text-align:left;">'+
+        '<strong>'+hiddenPremium+' premium task'+(hiddenPremium===1?'':'s')+'</strong> '+
+        'have all their general slots filled. Reserved slots open to everyone when the timer ends. '+
+        '<a href="#" onclick="go(\'upgrade\');return false;" style="color:#4338ca;font-weight:700;">Upgrade to unlock instantly →</a>'+
+        '</div>';
+    }
   }
 
   var tasksHtml=liveTasks.length===0
     ? '<p class="muted">No tasks available right now. Check back soon.</p>'
     : '<div class="grid">'+liveTasks.map(function(t){
         var cat=CATEGORIES[t.category]||{color:"#0d9488"};
-        var rinfo = premiumReservationInfo(t);
+        var p = taskPoolInfo(t);
+        var premiumBadge = t.premium ? ' <span class="pill" style="background:#f59e0b;">★ PREMIUM</span>' : "";
+        var windowBadge = (t.premium && p.inWindow) ? ' <span class="pill" style="background:#7c3aed;">reserved · '+humanizeSeconds(p.windowSecondsLeft)+'</span>' : "";
+
+        // Show pool info line
+        var poolLine = "";
+        if(t.premium){
+          var totalRemaining = p.reservedLeft + p.generalLeft;
+          if(p.inWindow){
+            if(paid){
+              poolLine = '<div class="pool-legend">'+
+                '<span><span class="dot" style="background:#7c3aed;"></span>'+p.reservedLeft+' reserved</span>'+
+                '<span><span class="dot" style="background:#0d9488;"></span>'+p.generalLeft+' general</span>'+
+                '</div>';
+            } else {
+              poolLine = '<div class="pool-legend">'+
+                '<span><span class="dot" style="background:#0d9488;"></span>'+p.generalLeft+' open to you</span>'+
+                '<span class="muted">· reserved slots unlock in '+humanizeSeconds(p.windowSecondsLeft)+'</span>'+
+                '</div>';
+            }
+          } else {
+            poolLine = '<div class="pool-legend">'+
+              '<span><span class="dot" style="background:#0d9488;"></span>'+totalRemaining+' open to everyone</span>'+
+              '</div>';
+          }
+        }
+
+        var completedLine = t.completed+'/'+t.quantity+' completed';
+
         return '<div class="task-card'+(t.premium?' premium-task':'')+'">'+
-          '<span class="pill" style="background:'+cat.color+';">'+t.category+'</span>'+
-          (t.premium?' <span class="pill" style="background:#f59e0b;">★ PREMIUM</span>':'')+
-          (t.premium && isPaid && rinfo.reserved ? ' <span class="pill" style="background:#7c3aed;">reserved · '+humanizeSeconds(rinfo.secondsLeft)+'</span>' : '')+
+          '<span class="pill" style="background:'+cat.color+';">'+t.category+'</span>'+premiumBadge+windowBadge+
           '<h3 style="margin:10px 0 4px;">'+fmtN(t.reward)+' <span class="muted" style="font-size:13px;">per completion</span></h3>'+
           '<p class="muted" style="font-size:14px;min-height:40px;">'+esc(t.instructions).slice(0,90)+'…</p>'+
-          '<div class="muted" style="font-size:12px;margin-bottom:10px;">'+t.completed+'/'+t.quantity+' completed</div>'+
-          '<button class="btn btn-primary" style="width:100%;" '+(blocked?"disabled":"")+' onclick="startTask(\''+t.id+'\')">'+actionButtonLabel(t.category, blocked)+'</button>'+
+          '<div class="muted" style="font-size:12px;">'+completedLine+'</div>'+
+          poolLine+
+          '<button class="btn btn-primary" style="width:100%;margin-top:10px;" '+(blocked?"disabled":"")+' onclick="startTask(\''+t.id+'\')">'+actionButtonLabel(t.category, blocked)+'</button>'+
         '</div>';
       }).join("")+'</div>';
 
@@ -1289,9 +1431,16 @@ function renderTaskDetail(){
   var start=state.activeStart, task=state.currentTask;
   if(!start||!task) return '<div class="card">No active task. <button class="btn btn-primary" onclick="go(\'dashboard\')">Back</button></div>';
   var cat=CATEGORIES[task.category]||{color:"#0d9488"};
+  var poolBadge = "";
+  if(task.premium){
+    poolBadge = start.pool === "reserved"
+      ? ' <span class="pill" style="background:#7c3aed;">reserved slot</span>'
+      : ' <span class="pill" style="background:#0d9488;">general slot</span>';
+  }
   return '<div class="card wide" style="max-width:720px;">'+
     '<span class="pill" style="background:'+cat.color+';">'+task.category+'</span>'+
     (task.premium?' <span class="pill" style="background:#f59e0b;">★ PREMIUM</span>':'')+
+    poolBadge+
     '<h2 style="margin-top:10px;">'+fmtN(task.reward)+' — '+task.category+' task</h2>'+
     '<p class="muted">'+esc(task.instructions)+'</p>'+
     '<a class="action-link" href="'+esc(task.link)+'" target="_blank" rel="noreferrer">'+actionButtonIcon(task.category)+'<span>'+actionLinkLabel(task.category)+'</span></a>'+
@@ -1309,7 +1458,8 @@ function renderSubmissions(){
   var rows=mine.length===0?'<p class="muted">No submissions yet.</p>':mine.map(function(s){
     var task=state.tasks.filter(function(t){return t.id===s.task_id})[0];
     var color=s.status==="approved"?"#16a34a":s.status==="rejected"?"#dc2626":"#d97706";
-    return '<div class="row"><div><strong>'+(task?task.category:"Task")+'</strong> — '+fmtN(s.payout)+
+    var poolTag = s.used_reserved_slot ? ' <span class="pill" style="background:#7c3aed;font-size:10px;">R</span>' : "";
+    return '<div class="row"><div><strong>'+(task?task.category:"Task")+'</strong>'+poolTag+' — '+fmtN(s.payout)+
       '<div class="muted" style="font-size:12px;">'+new Date(Number(s.submitted_at)).toLocaleString()+'</div>'+
       (s.reason?'<div style="font-size:13px;color:#dc2626;">'+esc(s.reason)+'</div>':"")+
       '</div><span class="pill" style="background:'+color+';">'+s.status+(s.auto_approved?" (auto)":"")+'</span></div>';
@@ -1401,7 +1551,7 @@ function renderWallet(){
         '<option value="affiliate"'+(state.wdType==="affiliate"?" selected":"")+'>Affiliate earnings — min '+fmtN(minAff)+' — next '+nextAff+'</option>'+
       '</select>'+
       '<input id="wd-amount" type="number" placeholder="Amount" />'+
-      '<p class="muted" style="font-size:12px;">Fee: '+(feePct*100).toFixed(0)+'% of the amount (your tier: '+((tb && tb.withdraw_fee_pct) ? (tb.withdraw_fee_pct*100).toFixed(0)+'%' : '20%')+'). Paid to your approved bank: '+esc(approvedPayout.bank_name)+' ••••'+esc(approvedPayout.account_number.slice(-4))+'</p>';
+      '<p class="muted" style="font-size:12px;">Fee: '+(feePct*100).toFixed(0)+'% of the amount. Paid to your approved bank: '+esc(approvedPayout.bank_name)+' ••••'+esc(approvedPayout.account_number.slice(-4))+'</p>';
     var currentDayAllowed = state.wdType==="affiliate" ? canAff : canTask;
     if(!currentDayAllowed){
       withdrawBlock += '<button class="btn btn-amber btn-full" disabled>Withdrawals closed today</button>'+
@@ -1580,7 +1730,6 @@ function renderUpgrade(){
   var paid=TIERS.filter(function(t){return t.fee>0});
   var options=paid.map(function(t){return '<option value="'+t.id+'"'+(t.id===state.upgradeTierId?" selected":"")+'>'+t.name+' — '+fmtN(t.fee)+'</option>'}).join("");
 
-  // Build the benefits comparison table
   var benefitRows = [
     ["Earning multiplier", function(b){ return b ? "×"+b.multiplier : "—" }],
     ["Premium tasks", function(b){ return b && b.premium_access ? "Yes" : "No" }],
@@ -1653,7 +1802,7 @@ function renderCreateTask(){
     '<input id="ct-reward" type="number" value="'+d.payout+'" oninput="updateTaskTotals()" />'+
     '<label class="lbl">Instructions</label>'+
     '<textarea id="ct-instructions" style="min-height:90px;">'+d.template+'</textarea>'+
-    '<label style="display:flex;gap:8px;align-items:center;margin:12px 0;"><input type="checkbox" id="ct-premium" /> Premium lane — reserved for paid-tier workers for the first 24 hours</label>'+
+    '<label style="display:flex;gap:8px;align-items:center;margin:12px 0;"><input type="checkbox" id="ct-premium" /> <span><strong>Premium task</strong> — a portion of slots are reserved for paid-tier workers for the first 12 hours. Fills faster with our most active workers.</span></label>'+
     '<div style="background:rgba(241,245,249,.7); border:1px solid var(--slate-200); border-radius:12px; padding:14px;">'+
       '<div>Worker payout total: <strong id="ct-worker-total">'+fmtN(d.payout*MIN_TASK_QTY)+'</strong></div>'+
       '<div>Platform commission (50%): <strong id="ct-commission">'+fmtN(d.payout*MIN_TASK_QTY*0.5)+'</strong></div>'+
@@ -1677,12 +1826,27 @@ function renderMyTasks(){
   var rows=list.length===0?'<p class="muted">You haven\'t posted any tasks yet.</p>':list.map(function(t){
     var statusColor=t.status==="live"?"#16a34a":t.status==="completed"?"#0d9488":t.status==="paused"?"#94a3b8":t.status==="cancelled"?"#dc2626":"#d97706";
     var pct=Math.min(100,(t.completed/t.quantity)*100);
+    var p = taskPoolInfo(t);
+    var poolLine = "";
+    if(t.premium){
+      if(p.inWindow){
+        poolLine = '<div class="pool-legend" style="margin-top:6px;">'+
+          '<span><span class="dot" style="background:#7c3aed;"></span>'+p.reservedLeft+' reserved (open in '+humanizeSeconds(p.windowSecondsLeft)+')</span>'+
+          '<span><span class="dot" style="background:#0d9488;"></span>'+p.generalLeft+' general</span>'+
+          '</div>';
+      } else {
+        poolLine = '<div class="pool-legend" style="margin-top:6px;">'+
+          '<span><span class="dot" style="background:#0d9488;"></span>All '+ (p.reservedLeft + p.generalLeft) +' remaining slots open to everyone</span>'+
+          '</div>';
+      }
+    }
     return '<div class="row" style="flex-direction:column;align-items:stretch;">'+
       '<div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:6px;">'+
         '<strong>'+t.category+' &middot; '+fmtN(t.reward)+'/task'+(t.premium?' <span class="pill" style="background:#f59e0b;">★ PREMIUM</span>':'')+'</strong>'+
         '<span class="pill" style="background:'+statusColor+';">'+t.status+'</span>'+
       '</div>'+
       '<div class="muted" style="font-size:14px;margin-top:6px;">'+t.completed+'/'+t.quantity+' completed &middot; '+fmtN(t.completed*t.reward*1.5)+' of '+fmtN(t.escrow_total||t.advertiser_total)+' spent &middot; '+fmtN(t.escrow_remaining||0)+' remaining in escrow</div>'+
+      poolLine+
       '<div class="progress-bg"><div class="progress-fg" style="width:'+pct+'%;"></div></div>'+
     '</div>';
   }).join("");
@@ -1797,7 +1961,7 @@ function startNotifPolling(){
 
 document.addEventListener("click", function(e){
   if(state.notifPanelOpen && !e.target.closest(".notif-panel") && !e.target.closest(".bell")){
-    state.notifPanelOpen=false; render();
+    state.notifPanelOpen = false; render();
   }
 });
 

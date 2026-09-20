@@ -88,8 +88,7 @@
   .drawer-item.logout{color:#b91c1c}
   .drawer-item.logout:hover{background:var(--danger-bg)}
   .drawer-sep{height:1px;background:var(--slate-200);margin:8px 6px}
-  .drawer-foot{padding:14px 20px;border-top:1px solid var(--slate-200);color:var(--slate-400);font-size:12px;text-align:center}
-  .drawer-foot a{color:var(--teal-600);text-decoration:none;font-weight:600}
+  .drawer-foot{padding:14px 20px;border-top:1px solid var(--slate-200);color:var(--slate-400);font-size:12px;text-align:center;font-style:italic}
   .card{background:rgba(255,255,255,.92);border:1px solid rgba(226,232,240,.9);border-radius:var(--radius);padding:24px;max-width:620px;margin:24px auto;box-shadow:var(--shadow)}
   .card.wide{max-width:none}
   .hero{position:relative;overflow:hidden;padding:56px 24px 40px;border-radius:24px;
@@ -146,8 +145,6 @@
   .progress-bg{height:7px;background:rgba(148,163,184,.25);border-radius:999px;margin-top:10px;overflow:hidden}
   .progress-fg{height:100%;background:linear-gradient(90deg,var(--teal-500),var(--teal-700));border-radius:999px;transition:width .4s ease}
   .footer{text-align:center;margin-top:40px;padding:20px;color:var(--slate-400);font-size:13px}
-  .footer a{color:var(--teal-600);text-decoration:none;font-weight:600}
-  .footer a:hover{text-decoration:underline}
   a{color:var(--teal-600)}
   .spinner{display:inline-block;width:14px;height:14px;border:2px solid rgba(255,255,255,.4);border-top-color:#fff;border-radius:50%;animation:spin .6s linear infinite;vertical-align:-2px;margin-right:6px}
   @keyframes spin{to{transform:rotate(360deg)}}
@@ -191,7 +188,7 @@
     </div>
   </div>
   <div class="drawer-body" id="drawer-body"></div>
-  <div class="drawer-foot"><a href="admin.html">Complete Your Tasks as Soon as Possible</a></div>
+  <div class="drawer-foot">Complete your tasks as soon as possible</div>
 </aside>
 
 <div class="app-shell"><div id="root"></div></div>
@@ -199,11 +196,13 @@
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script>
 /* ============================================================
-   TaskLoop — main app (fixed: withdrawals loader added)
+   TaskLoop — main app
+   Fixed: affiliate withdrawal selection persists, plus
+   Withdraw button on the dashboard.
    ============================================================ */
 
 var SUPABASE_URL = "https://jcajknuldlkuwtxhymbt.supabase.co";
-var SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImpjYWprbnVsZGxrdXd0eGh5bWJ0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODk1NjE1MjIsImV4cCI6MjEwNTEzNzUyMn0.erATFYwKkdq6crbHqu1KG3OknUCEDcN6CvvkGDHZRn8";
+var SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImpjYWprbnVsbGRrdXd0eGh5bWJ0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODk1NjE1MjIsImV4cCI6MjEwNTEzNzUyMn0.erATFYwKkdq6crbHqu1KG3OknUCEDcN6CvvkGDHZRn8";
 var sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 var TIERS = [
@@ -285,7 +284,7 @@ function setSession(s){ if(s) localStorage.setItem(SESSION_KEY, JSON.stringify(s
 var state = {
   user: null,
   tasks: [], submissions: [], ledger: [], notifications: [],
-  withdrawals: [],           /* <— THE FIX */
+  withdrawals: [],
   settings: null, payoutMethods: [], support: null, referrals: [],
   route: "loading",
   activeStart: null,
@@ -293,6 +292,7 @@ var state = {
   walletStage: "select", walletAmount: 10000,
   payoutStage: "view",
   ledgerFilter: "all",
+  wdType: "task",
   notifPanelOpen: false,
   _lastNotifId: null,
   _askedNotifPerm: false
@@ -584,7 +584,7 @@ async function submitTask(){
 }
 
 async function requestWithdrawal(){
-  var type=document.getElementById("wd-type").value;
+  var type=state.wdType||"task";
   var amount=Number(document.getElementById("wd-amount").value);
   var min = type==="task" ? Number((state.settings&&state.settings.withdraw_min_task)||10000)
                           : Number((state.settings&&state.settings.withdraw_min_affiliate)||1000);
@@ -822,9 +822,9 @@ function renderLanding(){
     '</div>'+
     '<div class="steps">'+stepsHtml+'</div>'+
     '<div style="background:linear-gradient(135deg, rgba(20,184,166,.10), rgba(251,191,36,.08)); border:1px solid rgba(20,184,166,.25); border-radius:16px; padding:22px; margin-top:28px; color:#0f766e;">'+
-      "<strong>Your Submissions are under control:</strong> Admin reviews every submission within 24 hours."+
+      "<strong>Your submissions are under control:</strong> every submission is reviewed by an admin within 24 hours."+
     '</div>'+
-    '<div class="footer">Looking for ways to earn<a href="admin.html"></a>?</div>';
+    '<div class="footer">Complete your tasks as soon as possible to keep earning.</div>';
 }
 
 function renderSignup(){
@@ -880,6 +880,7 @@ function renderDashboard(){
     '</div>'+
     '<div style="display:flex; gap:8px; margin-top:14px; flex-wrap:wrap;">'+
       '<button class="btn btn-primary" onclick="go(\'myAccount\')">My Account</button>'+
+      '<button class="btn btn-amber" onclick="go(\'wallet\')">Withdraw</button>'+
       '<button class="btn btn-ghost" onclick="go(\'fundWallet\')">Fund wallet</button>'+
       '<button class="btn btn-ghost" onclick="go(\'createTask\')">Post a task</button>'+
     '</div>'+
@@ -1076,13 +1077,14 @@ function renderWallet(){
     withdrawBlock = '<div class="banner" style="background:#fef3c7;color:#92400e;">You need an approved payout method before you can withdraw. <a href="#" onclick="go(\'payout\');return false;" style="color:#0f766e;font-weight:700;">Add one →</a></div>';
   } else {
     withdrawBlock =
-      '<select id="wd-type" onchange="render()">'+
-        '<option value="task">Task earnings — min '+fmtN(minTask)+' — next '+nextTask+'</option>'+
-        '<option value="affiliate">Affiliate earnings — min '+fmtN(minAff)+' — next '+nextAff+'</option>'+
+      '<select id="wd-type" onchange="state.wdType=this.value;render()">'+
+        '<option value="task"'+(state.wdType==="task"?" selected":"")+'>Task earnings — min '+fmtN(minTask)+' — next '+nextTask+'</option>'+
+        '<option value="affiliate"'+(state.wdType==="affiliate"?" selected":"")+'>Affiliate earnings — min '+fmtN(minAff)+' — next '+nextAff+'</option>'+
       '</select>'+
       '<input id="wd-amount" type="number" placeholder="Amount" />'+
       '<p class="muted" style="font-size:12px;">Fee: '+(feePct*100).toFixed(0)+'% of the amount. Paid to your approved bank: '+esc(approvedPayout.bank_name)+' ••••'+esc(approvedPayout.account_number.slice(-4))+'</p>';
-    if(!canTask && !canAff){
+    var currentDayAllowed = state.wdType==="affiliate" ? canAff : canTask;
+    if(!currentDayAllowed){
       withdrawBlock += '<button class="btn btn-amber btn-full" disabled>Withdrawals closed today</button>'+
         '<p class="muted" style="font-size:12px;">Task: next '+nextTask+' &middot; Affiliate: next '+nextAff+'</p>';
     } else {

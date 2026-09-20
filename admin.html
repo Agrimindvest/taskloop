@@ -172,7 +172,7 @@
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script>
 /* ============================================================
-   TaskLoop — admin portal (final)
+   TaskLoop — admin portal (final, with bank editing)
    ============================================================ */
 
 var SUPABASE_URL = "https://jcajknuldlkuwtxhymbt.supabase.co";
@@ -204,7 +204,6 @@ var state = {
   tab: "overview",
   modal: null,
   search: "",
-  // settings edit buffer
   editBlockedDays: [],
   editBlockedDates: [],
   editExpiryDays: 30,
@@ -213,10 +212,8 @@ var state = {
   editWithdrawMinTask: 10000,
   editWithdrawMinAffiliate: 1000,
   editWithdrawFeePct: 20,
-  // support edit buffer
   editSupport: {},
-  // broadcast
-  broadcastMode: "all",   // "all" | "one"
+  broadcastMode: "all",
   broadcastTargetEmail: "",
   broadcastKind: "broadcast",
   broadcastTitle: "",
@@ -360,7 +357,6 @@ async function callAdmin(fnName, params, successMsg){
   }
 }
 
-/* ---------- Individual actions ---------- */
 function approveSubmission(id){ callAdmin("fn_admin_approve_submission",{p_submission_id:id},"Approved & credited") }
 function rejectSubmission(id){ callAdmin("fn_admin_reject_submission",{p_submission_id:id,p_reason:"Rejected by admin"},"Submission rejected") }
 function approveTask(id){ callAdmin("fn_admin_approve_task",{p_task_id:id},"Task is now live") }
@@ -471,7 +467,6 @@ function toggleWithdrawDow(type, d){
 }
 function toggleWithdrawDom(type, d){
   var arr = type==="task" ? state.editWithdrawTaskDays : state.editWithdrawAffiliateDays;
-  // Removing all <=6 entries when switching to dom mode is confusing, so we just toggle the number
   var i=arr.indexOf(d);
   if(i===-1) arr.push(d); else arr.splice(i,1);
   render();
@@ -521,6 +516,25 @@ function saveSupport(){
 }
 function updateSupportField(k, v){
   state.editSupport[k]=v;
+}
+
+/* ---------- BANK ACCOUNTS ---------- */
+function saveBanks(){
+  var wnum = document.getElementById("pb-wallet-number").value.trim();
+  var wname = document.getElementById("pb-wallet-name").value.trim();
+  var wlabel = document.getElementById("pb-wallet-label").value.trim();
+  var tnum = document.getElementById("pb-tier-number").value.trim();
+  var tname = document.getElementById("pb-tier-name").value.trim();
+  var tlabel = document.getElementById("pb-tier-label").value.trim();
+  if(!wnum||!wname||!wlabel||!tnum||!tname||!tlabel){notify("Fill in all six fields","error");return}
+  callAdmin("fn_admin_update_banks",{
+    p_wallet_number: wnum,
+    p_wallet_name: wname,
+    p_wallet_label: wlabel,
+    p_tier_number: tnum,
+    p_tier_name: tname,
+    p_tier_label: tlabel
+  },"Bank accounts saved");
 }
 
 /* ---------- BROADCAST ---------- */
@@ -822,7 +836,6 @@ function renderAuditTab(){
 function renderSettingsTab(){
   if(!state.settings) return '<p class="muted">Loading settings…</p>';
 
-  // ---- Task availability ----
   var daysHtml = DAY_NAMES.map(function(name,i){
     var blocked=state.editBlockedDays.indexOf(i)!==-1;
     return '<button class="day-btn '+(blocked?"blocked":"allowed")+'" onclick="toggleDay('+i+')">'+name+'</button>';
@@ -832,7 +845,6 @@ function renderSettingsTab(){
       return '<span class="pill" style="background:#334155; margin:4px; cursor:pointer;" onclick="removeBlockedDate(\''+d+'\')">'+d+' ×</span>';
     }).join("");
 
-  // ---- Withdrawal days editor (two modes: DOW and DOM) ----
   function dowRow(type, label){
     var arr = type==="task" ? state.editWithdrawTaskDays : state.editWithdrawAffiliateDays;
     return '<div style="margin-bottom:6px;"><strong style="font-size:13px;">'+label+'</strong></div>'+
@@ -853,24 +865,22 @@ function renderSettingsTab(){
       '<button class="btn btn-ghost btn-sm" onclick="clearWithdrawDays(\''+type+'\')" style="margin-top:8px;">Clear</button>';
   }
 
-  // ---- Support ----
   var sp = state.editSupport||{};
   function sfield(key,label){
     return '<label class="lbl">'+label+'</label><input value="'+esc(sp[key]||"")+'" oninput="updateSupportField(\''+key+'\',this.value)" />';
   }
 
-  return '<div class="hero"><h2>Platform settings</h2><p>Everything that controls the marketplace: task days, withdrawal schedule, fee, minimums, and support contacts.</p></div>'+
+  return '<div class="hero"><h2>Platform settings</h2><p>Task days, withdrawal schedule, fee, minimums, support contacts, and bank accounts.</p></div>'+
 
     '<div class="card" style="max-width:none;">'+
       '<div class="settings-section">'+
         '<h3>Task availability — blocked days of the week</h3>'+
-        '<p class="hint">Red days are paused. Server enforces this — cannot be bypassed from the browser.</p>'+
+        '<p class="hint">Red days are paused. Server enforces this.</p>'+
         '<div class="day-toggle">'+daysHtml+'</div>'+
       '</div>'+
 
       '<div class="settings-section">'+
         '<h3>Blackout dates (specific)</h3>'+
-        '<p class="hint">One-off dates when tasks are paused.</p>'+
         '<div style="margin-bottom:12px;">'+datesHtml+'</div>'+
         '<div style="display:flex;gap:8px;align-items:flex-end;">'+
           '<div style="flex:1;"><label class="lbl">Add a blackout date</label><input id="new-blocked-date" type="date" /></div>'+
@@ -886,7 +896,7 @@ function renderSettingsTab(){
 
       '<div class="settings-section">'+
         '<h3>Withdrawal schedule — Task earnings</h3>'+
-        '<p class="hint">Choose either weekdays OR days-of-month. To switch modes, clear first and then pick the other.</p>'+
+        '<p class="hint">Choose either weekdays OR days-of-month. To switch modes, clear first.</p>'+
         dowRow("task","Days of week")+
         domRow("task")+
       '</div>'+
@@ -918,6 +928,25 @@ function renderSettingsTab(){
       sfield("whatsapp_channel_link","WhatsApp channel link")+
       sfield("telegram_channel_link","Telegram channel link")+
       '<button class="btn btn-primary btn-full" onclick="saveSupport()">Save support contacts</button>'+
+    '</div>'+
+
+    '<div class="card" style="max-width:none; margin-top:20px;">'+
+      '<h2 style="margin-top:0;">Platform bank accounts</h2>'+
+      '<p class="muted" style="font-size:13px;">These are the accounts users see when funding their wallet or upgrading tier. Two separate accounts so bank reconciliation is easy.</p>'+
+
+      '<h3 style="margin-top:16px;">Wallet funding bank</h3>'+
+      '<p class="muted" style="font-size:12px;">Shown when a user clicks "Fund wallet" to pay for tasks.</p>'+
+      '<label class="lbl">Account number</label><input id="pb-wallet-number" value="'+esc(state.settings.wallet_bank_number||"")+'" />'+
+      '<label class="lbl">Account name</label><input id="pb-wallet-name" value="'+esc(state.settings.wallet_bank_name||"")+'" />'+
+      '<label class="lbl">Bank name</label><input id="pb-wallet-label" value="'+esc(state.settings.wallet_bank_label||"")+'" />'+
+
+      '<h3 style="margin-top:22px;">Tier upgrade bank</h3>'+
+      '<p class="muted" style="font-size:12px;">Shown when a user clicks "Upgrade tier".</p>'+
+      '<label class="lbl">Account number</label><input id="pb-tier-number" value="'+esc(state.settings.tier_bank_number||"")+'" />'+
+      '<label class="lbl">Account name</label><input id="pb-tier-name" value="'+esc(state.settings.tier_bank_name||"")+'" />'+
+      '<label class="lbl">Bank name</label><input id="pb-tier-label" value="'+esc(state.settings.tier_bank_label||"")+'" />'+
+
+      '<button class="btn btn-primary btn-full" onclick="saveBanks()">Save bank accounts</button>'+
     '</div>';
 }
 
@@ -1072,7 +1101,6 @@ function render(){
   if(si){
     si.oninput=function(){ state.search=si.value; var cur=si.selectionStart; render(); var n=document.getElementById("user-search"); if(n){n.focus(); try{n.setSelectionRange(cur,cur)}catch(e){}} };
   }
-  // Prefill support edit buffer if empty
   if(state.tab==="settings" && state.support && (!state.editSupport || Object.keys(state.editSupport).length===0)){
     state.editSupport = Object.assign({}, state.support);
   }
